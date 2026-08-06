@@ -53,7 +53,7 @@ Agentic context grows quadratically: every turn resends the whole history, so a 
 **From a private Git URL:**
 
 ```
-/plugin marketplace add https://gitlab.callminerhq.callminer.net/Russell.Benzing/yeschef
+/plugin marketplace add https://github.com/rbenzing/YesChef
 /plugin install yeschef@yeschef
 ```
 

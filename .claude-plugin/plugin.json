@@ -1,0 +1,10 @@
+{
+  "name": "yeschef",
+  "version": "0.1.0",
+  "description": "Kitchen-brigade AI harness: token thrift, clean context, autonomous service. BouzéCode methodology as a Claude Code plugin — batch discipline, result compaction, loop/paralysis guards, brigade subagents, mise-en-place notes.",
+  "author": { "name": "Russell Benzing" },
+  "homepage": "https://gitlab.callminerhq.callminer.net/Russell.Benzing/yeschef",
+  "repository": "https://gitlab.callminerhq.callminer.net/Russell.Benzing/yeschef",
+  "license": "Apache-2.0",
+  "keywords": ["tokens", "context", "harness", "autonomy", "subagents", "bouzecode", "efficiency"]
+}

@@ -1,0 +1,6 @@
+node_modules/
+*.log
+.DS_Store
+# dist/ is COMMITTED on purpose (zero-install plugin). Do not ignore it.
+.yeschef/
+coverage/

@@ -1,0 +1,13 @@
+{
+  "name": "yeschef",
+  "description": "YesChef — kitchen-brigade AI harness plugin for Claude Code",
+  "owner": { "name": "Russell Benzing" },
+  "plugins": [
+    {
+      "name": "yeschef",
+      "description": "Token thrift, clean context, autonomous service: batch discipline, result compaction, loop/paralysis guards, brigade subagents, mise-en-place notes, kitchen telemetry.",
+      "source": "./",
+      "keywords": ["tokens", "context", "harness", "autonomy", "subagents", "efficiency"]
+    }
+  ]
+}

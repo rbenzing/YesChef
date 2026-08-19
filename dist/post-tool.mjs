@@ -156,16 +156,24 @@ function hashCall(toolName, toolInput) {
 import { writeFileSync as writeFileSync2 } from "node:fs";
 import { join as join2 } from "node:path";
 import { createHash as createHash2 } from "node:crypto";
-var TEST_CMD = /\b(pytest|py\.test|jest|vitest|go\s+test|dotnet\s+test|cargo\s+(test|nextest)|phpunit|rspec|mocha|tape|ava|unittest|tox)\b|\b(npm|yarn|pnpm|bun)\s+(run\s+)?test\b/;
+var RUNNERS = String.raw`pytest|py\.test|jest|vitest|phpunit|rspec|mocha|tape|ava|tox|ctest|unittest`;
+var LAUNCHERS = String.raw`(?:npx\s+|bunx\s+|(?:pnpm|yarn)\s+(?:exec|dlx)\s+|uv\s+run\s+|python3?\s+-m\s+|py\s+-m\s+)?`;
+var TEST_CMD = new RegExp(
+  String.raw`(?:^|[;&|\n]|\$\()\s*` + String.raw`(?:[A-Za-z_][A-Za-z0-9_]*=\S*\s+)*` + // CI=true ...
+  String.raw`(?:sudo\s+|time\s+)?` + String.raw`(?:` + LAUNCHERS + String.raw`(?:\S*[\\/])?(?:${RUNNERS})\b(?![.\\/-])` + // runner exe, optionally path-invoked; excludes jest.config.js / jest-report.sh
+  String.raw`|go\s+test\b|dotnet\s+test\b|cargo\s+(?:test|nextest)\b` + String.raw`|(?:npm|yarn|pnpm|bun)\s+(?:run\s+)?test\b|npm\s+t\b` + String.raw`|make\s+test\b|(?:\S*[\\/])?gradlew(?:\.bat)?\s+[^;&|\n]*\btest\b|mvn\s+[^;&|\n]*\btest\b` + String.raw`)`
+);
 function looksLikeTestCommand(command) {
   return TEST_CMD.test(command);
 }
+var FAIL_CHAR_CAP = 2e4;
 function saveOverflow(dir, label, full) {
   const name = `${label}-${createHash2("md5").update(full).digest("hex").slice(0, 8)}.txt`;
   const p = join2(dir, name);
   try {
     writeFileSync2(p, full);
   } catch {
+    return null;
   }
   return p;
 }
@@ -209,8 +217,12 @@ function compactTestOutput(output, exitCodeNonZero, overflowPath) {
     let kept = extractFailureLines(lines);
     if (kept.length === 0) kept = lines.slice(-60);
     if (kept.length > 220) kept = [...kept.slice(0, 180), `  \u2026 ${kept.length - 200} failure lines omitted \u2026`, ...kept.slice(-20)];
+    let body = kept.join("\n");
+    if (body.length > FAIL_CHAR_CAP) {
+      body = body.slice(0, FAIL_CHAR_CAP - 1500) + "\n  \u2026[yeschef] failure detail char-capped\u2026\n" + body.slice(-1200);
+    }
     const text = `[yeschef] test failures (compacted):
-${kept.join("\n")}`;
+${body}`;
     return finish(text, output, overflowPath, "tests-failed");
   }
   return { text: output, savedChars: 0, kind: "unchanged" };
@@ -218,8 +230,9 @@ ${kept.join("\n")}`;
 function finish(text, full, overflowDir2, kind) {
   if (text.length >= full.length) return { text: full, savedChars: 0, kind: "unchanged" };
   const p = saveOverflow(overflowDir2, "test", full);
-  return { text: `${text}
-[yeschef] full output: ${p}`, savedChars: full.length - text.length, kind };
+  const out = p ? `${text}
+[yeschef] full output: ${p}` : text;
+  return { text: out, savedChars: full.length - out.length, kind };
 }
 function truncateGeneric(output, maxLines, maxChars, headLines, tailLines, overflowDir2) {
   const lines = output.split("\n");
@@ -236,8 +249,8 @@ function truncateGeneric(output, maxLines, maxChars, headLines, tailLines, overf
   const omitted = Math.max(0, lines.length - headLines - (tail ? tailLines : 0));
   const what = [omitted > 0 ? `${omitted} lines` : "", headClipped ? "long lines char-clipped" : ""].filter(Boolean).join(", ") || "content";
   const text = `${head}
-[yeschef] truncated: ${what} (${output.length} chars total) omitted. Full output: ${p}
-Re-run with a filter (grep/head) or read specific ranges if you need more.` + (tail ? `
+[yeschef] truncated: ${what} (${output.length} chars total) omitted. ` + (p ? `Full output: ${p}
+` : "") + `Re-run with a filter (grep/head) or read specific ranges if you need more.` + (tail ? `
 --- tail ---
 ${tail}` : "");
   return { text, savedChars: Math.max(0, output.length - text.length), kind: "truncated" };
@@ -257,16 +270,18 @@ ${err}` : err : resp.stdout,
       return { text: resp.output, rebuild: (t) => ({ ...resp, output: t }) };
     }
     if (Array.isArray(resp.content)) {
-      let idx = -1;
+      const idx = [];
       for (let i = 0; i < resp.content.length; i++) {
         const b = resp.content[i];
-        if (b?.type === "text" && typeof b.text === "string" && (idx < 0 || b.text.length > resp.content[idx].text.length)) idx = i;
+        if (b?.type === "text" && typeof b.text === "string") idx.push(i);
       }
-      if (idx >= 0) {
-        const at = idx;
+      if (idx.length > 0) {
         return {
-          text: resp.content[at].text,
-          rebuild: (t) => ({ ...resp, content: resp.content.map((b, i) => i === at ? { ...b, text: t } : b) })
+          text: idx.map((i) => resp.content[i].text).join("\n"),
+          rebuild: (t) => ({
+            ...resp,
+            content: resp.content.map((b, i) => i === idx[0] ? { ...b, text: t } : idx.includes(i) ? { ...b, text: "" } : b)
+          })
         };
       }
     }
@@ -367,15 +382,17 @@ try {
       if (!failing) progress = true;
     }
     if (text) {
+      let r = { text, savedChars: 0, kind: "unchanged" };
+      let kind = "bash";
       if (isTest && cfg.testCompaction.enabled) {
-        applyCompaction(compactTestOutput(text, nonZero, overflowDir(cwd)), resp.rebuild, "test");
-      } else if (cfg.truncation.enabled) {
-        applyCompaction(
-          truncateGeneric(text, cfg.truncation.maxLines, cfg.truncation.maxChars, cfg.truncation.headLines, cfg.truncation.tailLines, overflowDir(cwd)),
-          resp.rebuild,
-          "bash"
-        );
+        r = compactTestOutput(text, nonZero, overflowDir(cwd));
+        kind = "test";
       }
+      if (r.kind === "unchanged" && cfg.truncation.enabled) {
+        r = truncateGeneric(text, cfg.truncation.maxLines, cfg.truncation.maxChars, cfg.truncation.headLines, cfg.truncation.tailLines, overflowDir(cwd));
+        kind = "bash";
+      }
+      applyCompaction(r, resp.rebuild, kind);
     }
   }
   if ((tool === "WebFetch" || tool === "WebSearch") && cfg.truncation.enabled) {

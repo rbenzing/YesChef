@@ -10,16 +10,38 @@ export interface CompactResult {
   kind: "tests-failed" | "tests-green" | "truncated" | "unchanged";
 }
 
-const TEST_CMD = /\b(pytest|py\.test|jest|vitest|go\s+test|dotnet\s+test|cargo\s+(test|nextest)|phpunit|rspec|mocha|tape|ava|unittest|tox)\b|\b(npm|yarn|pnpm|bun)\s+(run\s+)?test\b/;
+// A runner name must sit at a COMMAND position — start of a shell segment
+// (after ;|&, $( or a newline), past env assignments and known launchers —
+// so a mere mention in an argument (`cat jest.config.js`, `grep vitest src/`)
+// doesn't route the output through the test path (which would skip truncation
+// and corrupt the shared red/green test signal the stop guard reads).
+const RUNNERS = String.raw`pytest|py\.test|jest|vitest|phpunit|rspec|mocha|tape|ava|tox|ctest|unittest`;
+const LAUNCHERS = String.raw`(?:npx\s+|bunx\s+|(?:pnpm|yarn)\s+(?:exec|dlx)\s+|uv\s+run\s+|python3?\s+-m\s+|py\s+-m\s+)?`;
+const TEST_CMD = new RegExp(
+  String.raw`(?:^|[;&|\n]|\$\()\s*` +
+  String.raw`(?:[A-Za-z_][A-Za-z0-9_]*=\S*\s+)*` +      // CI=true ...
+  String.raw`(?:sudo\s+|time\s+)?` +
+  String.raw`(?:` +
+    LAUNCHERS + String.raw`(?:\S*[\\/])?(?:${RUNNERS})\b(?![.\\/-])` + // runner exe, optionally path-invoked; excludes jest.config.js / jest-report.sh
+    String.raw`|go\s+test\b|dotnet\s+test\b|cargo\s+(?:test|nextest)\b` +
+    String.raw`|(?:npm|yarn|pnpm|bun)\s+(?:run\s+)?test\b|npm\s+t\b` +
+    String.raw`|make\s+test\b|(?:\S*[\\/])?gradlew(?:\.bat)?\s+[^;&|\n]*\btest\b|mvn\s+[^;&|\n]*\btest\b` +
+  String.raw`)`
+);
 
 export function looksLikeTestCommand(command: string): boolean {
   return TEST_CMD.test(command);
 }
 
-function saveOverflow(dir: string, label: string, full: string): string {
+// Char ceiling for the kept failure section (~5k tokens) — generous enough for
+// real assertion diffs, small enough that a pathological run can't flood context.
+const FAIL_CHAR_CAP = 20_000;
+
+function saveOverflow(dir: string, label: string, full: string): string | null {
   const name = `${label}-${createHash("md5").update(full).digest("hex").slice(0, 8)}.txt`;
   const p = join(dir, name);
-  try { writeFileSync(p, full); } catch { /* pointer still useful-ish */ }
+  // A pointer to a file that was never written is a lie the model will chase.
+  try { writeFileSync(p, full); } catch { return null; }
   return p;
 }
 
@@ -88,7 +110,13 @@ export function compactTestOutput(
     let kept = extractFailureLines(lines);
     if (kept.length === 0) kept = lines.slice(-60); // unknown framework: tail has the error
     if (kept.length > 220) kept = [...kept.slice(0, 180), `  … ${kept.length - 200} failure lines omitted …`, ...kept.slice(-20)];
-    const text = `[yeschef] test failures (compacted):\n${kept.join("\n")}`;
+    let body = kept.join("\n");
+    // A line cap alone doesn't bound size: 200 kept lines of one-line jest
+    // object diffs can still be hundreds of KB. Enforce a char ceiling too.
+    if (body.length > FAIL_CHAR_CAP) {
+      body = body.slice(0, FAIL_CHAR_CAP - 1500) + "\n  …[yeschef] failure detail char-capped…\n" + body.slice(-1200);
+    }
+    const text = `[yeschef] test failures (compacted):\n${body}`;
     return finish(text, output, overflowPath, "tests-failed");
   }
   return { text: output, savedChars: 0, kind: "unchanged" };
@@ -97,7 +125,8 @@ export function compactTestOutput(
 function finish(text: string, full: string, overflowDir: string, kind: CompactResult["kind"]): CompactResult {
   if (text.length >= full.length) return { text: full, savedChars: 0, kind: "unchanged" };
   const p = saveOverflow(overflowDir, "test", full);
-  return { text: `${text}\n[yeschef] full output: ${p}`, savedChars: full.length - text.length, kind };
+  const out = p ? `${text}\n[yeschef] full output: ${p}` : text;
+  return { text: out, savedChars: full.length - out.length, kind };
 }
 
 export function truncateGeneric(
@@ -130,7 +159,8 @@ export function truncateGeneric(
   const what = [omitted > 0 ? `${omitted} lines` : "", headClipped ? "long lines char-clipped" : ""].filter(Boolean).join(", ") || "content";
   const text =
     `${head}\n[yeschef] truncated: ${what} (${output.length} chars total) omitted. ` +
-    `Full output: ${p}\nRe-run with a filter (grep/head) or read specific ranges if you need more.` +
+    (p ? `Full output: ${p}\n` : "") +
+    `Re-run with a filter (grep/head) or read specific ranges if you need more.` +
     (tail ? `\n--- tail ---\n${tail}` : "");
   return { text, savedChars: Math.max(0, output.length - text.length), kind: "truncated" };
 }
@@ -154,18 +184,23 @@ export function extractResponseText(resp: any): { text: string; rebuild: (t: str
       return { text: resp.output, rebuild: (t) => ({ ...resp, output: t }) };
     }
     if (Array.isArray(resp.content)) {
-      // Pick the LARGEST text block, not the first — a short summary block
-      // followed by a huge dump block previously made the dump invisible here.
-      let idx = -1;
+      // Extract EVERY text block, not just the largest — a dump split across
+      // several medium blocks previously kept all but one out of the size cap.
+      // The compacted text lands in the first text block and the rest are
+      // emptied, mirroring the stdout/stderr contract above.
+      const idx: number[] = [];
       for (let i = 0; i < resp.content.length; i++) {
         const b = resp.content[i];
-        if (b?.type === "text" && typeof b.text === "string" && (idx < 0 || b.text.length > resp.content[idx].text.length)) idx = i;
+        if (b?.type === "text" && typeof b.text === "string") idx.push(i);
       }
-      if (idx >= 0) {
-        const at = idx;
+      if (idx.length > 0) {
         return {
-          text: resp.content[at].text,
-          rebuild: (t) => ({ ...resp, content: resp.content.map((b: any, i: number) => (i === at ? { ...b, text: t } : b)) }),
+          text: idx.map((i) => resp.content[i].text).join("\n"),
+          rebuild: (t) => ({
+            ...resp,
+            content: resp.content.map((b: any, i: number) =>
+              i === idx[0] ? { ...b, text: t } : idx.includes(i) ? { ...b, text: "" } : b),
+          }),
         };
       }
     }

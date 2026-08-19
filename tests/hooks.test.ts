@@ -83,6 +83,16 @@ describe("post-tool compression", () => {
     expect(r.hookSpecificOutput.updatedToolOutput.stdout.length).toBeLessThan(big.length / 3);
     expect(r.updatedToolOutput).toBeUndefined(); // no undocumented top-level duplicate
   });
+  it("still truncates huge test-command output the compactor does not recognize", () => {
+    // Unknown reporter: compactTestOutput returns "unchanged" — the generic
+    // size cap must catch it (same fallback run_tests applies in server.ts).
+    const big = Array.from({ length: 900 }, (_, i) => `unrecognized reporter line ${i}`).join("\n");
+    const r = runHook("post-tool.mjs", {
+      hook_event_name: "PostToolUse", tool_name: "Bash",
+      tool_input: { command: "npx vitest run --reporter=weird" }, tool_response: { stdout: big, stderr: "", exit_code: 0 },
+    });
+    expect(r.hookSpecificOutput.updatedToolOutput.stdout).toContain("[yeschef] truncated");
+  });
   it("compacts failing pytest output and nudges after repeat failures", () => {
     const fail = "=== FAILURES ===\nAssertionError: boom\n=== 1 failed in 1s ===";
     const call = {

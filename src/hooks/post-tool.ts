@@ -123,13 +123,20 @@ try {
     }
 
     if (text) {
+      let r: CompactResult = { text, savedChars: 0, kind: "unchanged" };
+      let kind = "bash";
       if (isTest && cfg.testCompaction.enabled) {
-        applyCompaction(compactTestOutput(text, nonZero, overflowDir(cwd)), resp!.rebuild, "test");
-      } else if (cfg.truncation.enabled) {
-        applyCompaction(
-          truncateGeneric(text, cfg.truncation.maxLines, cfg.truncation.maxChars, cfg.truncation.headLines, cfg.truncation.tailLines, overflowDir(cwd)),
-          resp!.rebuild, "bash");
+        r = compactTestOutput(text, nonZero, overflowDir(cwd));
+        kind = "test";
       }
+      if (r.kind === "unchanged" && cfg.truncation.enabled) {
+        // Output the test compactor doesn't recognize must still hit the size
+        // cap — the same fallback run_tests applies (server.ts); without it a
+        // test-looking command with an unknown reporter bypasses truncation.
+        r = truncateGeneric(text, cfg.truncation.maxLines, cfg.truncation.maxChars, cfg.truncation.headLines, cfg.truncation.tailLines, overflowDir(cwd));
+        kind = "bash";
+      }
+      applyCompaction(r, resp!.rebuild, kind);
     }
   }
 

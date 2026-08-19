@@ -46,7 +46,27 @@ describe("test output compaction", () => {
     expect(looksLikeTestCommand("python -m pytest -q tests/")).toBe(true);
     expect(looksLikeTestCommand("npx vitest run")).toBe(true);
     expect(looksLikeTestCommand("npm test")).toBe(true);
+    expect(looksLikeTestCommand("npm t")).toBe(true);
+    expect(looksLikeTestCommand("make test")).toBe(true);
+    expect(looksLikeTestCommand("./gradlew test")).toBe(true);
+    expect(looksLikeTestCommand("mvn clean test")).toBe(true);
+    expect(looksLikeTestCommand("ctest --output-on-failure")).toBe(true);
+    expect(looksLikeTestCommand("node_modules/.bin/jest --ci")).toBe(true);
+    expect(looksLikeTestCommand("CI=true jest")).toBe(true);
+    expect(looksLikeTestCommand("npm run build && npx vitest run")).toBe(true);
     expect(looksLikeTestCommand("git status")).toBe(false);
+  });
+  it("does not classify runner names in ARGUMENTS as test runs", () => {
+    // A false positive routes output through the test path (skipping the
+    // generic size cap) and can flip the shared red/green signal the stop
+    // guard reads — from a grep result.
+    expect(looksLikeTestCommand("cat jest.config.js")).toBe(false);
+    expect(looksLikeTestCommand("grep -r vitest src/")).toBe(false);
+    expect(looksLikeTestCommand("git log --grep=mocha")).toBe(false);
+    expect(looksLikeTestCommand("ls tests/jest/")).toBe(false);
+    expect(looksLikeTestCommand("cat ./scripts/jest-report.sh")).toBe(false);
+    expect(looksLikeTestCommand("make build")).toBe(false);
+    expect(looksLikeTestCommand("mvn clean install")).toBe(false);
   });
   it("compacts green pytest to a one-liner", () => {
     const out = Array.from({ length: 300 }, (_, i) => `tests/test_x.py::test_${i} PASSED`).join("\n") +
@@ -86,6 +106,17 @@ describe("test output compaction", () => {
     expect(r.kind).toBe("tests-failed");
     expect(r.text).toContain("AssertionError: expected 200 got 401");
     expect(r.text).not.toContain("collecting item 50");
+  });
+  it("char-caps the kept failure section (one-line jest diffs must not flood context)", () => {
+    // 100 kept lines × 5k chars sails under the 220-LINE cap at ~500KB —
+    // the char ceiling has to bound it.
+    const out = "=== FAILURES ===\n" +
+      Array.from({ length: 100 }, (_, i) => `AssertionError ${i}: ${"x".repeat(5000)}`).join("\n") +
+      "\n=== 100 failed in 3s ===";
+    const r = compactTestOutput(out, true, dir);
+    expect(r.kind).toBe("tests-failed");
+    expect(r.text.length).toBeLessThan(25_000);
+    expect(r.text).toContain("char-capped");
   });
 });
 
@@ -133,13 +164,16 @@ describe("response text extraction", () => {
     const both = extractResponseText({ stdout: "out", stderr: "err" })!;
     expect(both.text).toBe("out\nerr");
   });
-  it("targets the LARGEST content text block, not the first", () => {
+  it("extracts ALL content text blocks and empties the extras on rebuild", () => {
+    // Rewriting only the largest block let a dump split across several medium
+    // blocks stay over the size cap while the savings were credited anyway.
     const dump = "x".repeat(500);
-    const r = extractResponseText({ content: [{ type: "text", text: "summary" }, { type: "text", text: dump }] })!;
-    expect(r.text).toBe(dump);
+    const r = extractResponseText({ content: [{ type: "text", text: "summary" }, { type: "text", text: dump }, { type: "image", data: "d" }] })!;
+    expect(r.text).toBe(`summary\n${dump}`);
     const rebuilt = r.rebuild("small");
-    expect(rebuilt.content[0].text).toBe("summary"); // sibling untouched
-    expect(rebuilt.content[1].text).toBe("small");
+    expect(rebuilt.content[0].text).toBe("small");     // compacted text lands in the first text block
+    expect(rebuilt.content[1].text).toBe("");          // nothing survives uncompacted
+    expect(rebuilt.content[2]).toEqual({ type: "image", data: "d" }); // non-text untouched
   });
 });
 

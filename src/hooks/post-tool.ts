@@ -8,6 +8,7 @@ import {
   hashCall, contextScope, setTestStatus,
 } from "../lib/core.js";
 import { compactTestOutput, truncateGeneric, looksLikeTestCommand, extractResponseText, isTestFailure, type CompactResult } from "../lib/compact.js";
+import { compactRecoveryContext } from "../lib/notes.js";
 
 const input = readHookInput();
 const cwd = input.cwd ?? process.cwd();
@@ -25,6 +26,14 @@ try {
   const hookOut: Record<string, any> = { hookEventName: input.hook_event_name ?? "PostToolUse" };
   let progress = false;
   const contexts: string[] = [];
+
+  // Deferred post-compaction re-seed: the PostCompact hook cannot emit context
+  // (the output schema rejects its hookEventName), so it flags us instead.
+  if (state.compactRecoveryPending) {
+    state.compactRecoveryPending = false;
+    const recovery = compactRecoveryContext(cwd);
+    if (recovery) contexts.push(recovery);
+  }
 
   const bumpFailureStreak = (cmd: string) => {
     const key = normalizeCmd(cmd);

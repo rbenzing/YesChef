@@ -126,6 +126,54 @@ describe("post-tool compression", () => {
   });
 });
 
+describe("post-compaction recovery", () => {
+  // Claude Code's hook-output schema rejects hookEventName "PostCompact", so the
+  // compact hook must emit NOTHING and hand the notes re-seed to the next
+  // context-bearing hook via state.compactRecoveryPending.
+  const seedNotes = () => {
+    const dir = join(home, "state", slug(cwd));
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "notes-kitchen.md"), "# Mise en place\n## goal\nship the feature\n## plan\n- [ ] finish relay\n## discoveries\n## decisions\n");
+  };
+  it("PostCompact emits nothing (schema-safe) and arms the relay flag", () => {
+    seedNotes();
+    expect(runHook("compact.mjs", { hook_event_name: "PostCompact" })).toBeNull();
+    const s = readState();
+    expect(s.compactRecoveryPending).toBe(true);
+    expect(s.reads).toEqual({}); // dedup records describe a context that no longer exists
+  });
+  it("PreCompact also emits nothing", () => {
+    seedNotes();
+    expect(runHook("compact.mjs", { hook_event_name: "PreCompact" })).toBeNull();
+  });
+  it("the next post-tool relays the notes re-seed exactly once", () => {
+    seedNotes();
+    runHook("compact.mjs", { hook_event_name: "PostCompact" });
+    const fp = join(cwd, "f.txt");
+    writeFileSync(fp, "x");
+    const post = { hook_event_name: "PostToolUse", tool_name: "Read", tool_input: { file_path: fp }, tool_response: "x" };
+    const r1 = runHook("post-tool.mjs", post);
+    expect(r1.hookSpecificOutput.hookEventName).toBe("PostToolUse"); // a schema-valid carrier
+    expect(r1.hookSpecificOutput.additionalContext).toContain("mise en place survives");
+    expect(r1.hookSpecificOutput.additionalContext).toContain("ship the feature");
+    const r2 = runHook("post-tool.mjs", post);
+    expect(JSON.stringify(r2 ?? {})).not.toContain("mise en place survives");
+  });
+  it("a user prompt also relays it, exactly once", () => {
+    seedNotes();
+    runHook("compact.mjs", { hook_event_name: "PostCompact" });
+    const r1 = runHook("user-prompt.mjs", { hook_event_name: "UserPromptSubmit" });
+    expect(r1.hookSpecificOutput.hookEventName).toBe("UserPromptSubmit");
+    expect(r1.hookSpecificOutput.additionalContext).toContain("mise en place survives");
+    const r2 = runHook("user-prompt.mjs", { hook_event_name: "UserPromptSubmit" });
+    expect(r2.hookSpecificOutput.additionalContext).not.toContain("mise en place survives");
+  });
+  it("PostCompact with no notes does not arm the relay", () => {
+    expect(runHook("compact.mjs", { hook_event_name: "PostCompact" })).toBeNull();
+    expect(readState().compactRecoveryPending).toBe(false);
+  });
+});
+
 describe("stop guard", () => {
   it("blocks a premature stop while plan items are open, then yields", () => {
     // Seed the SHARED kitchen notes — the same notes-kitchen.md the MCP notes

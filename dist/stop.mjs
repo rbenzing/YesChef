@@ -89,7 +89,8 @@ var EMPTY_STATE = {
   compaction: { results: 0, savedChars: 0 },
   brigade: { active: 0, finished: 0 },
   lastTestsFailing: false,
-  turn: 0
+  turn: 0,
+  compactRecoveryPending: false
 };
 function statePath(cwd2, sessionId2) {
   return join(ensureDir(stateDir(cwd2)), `${sessionId2.replace(/[^\w-]/g, "")}.json`);

@@ -149,12 +149,16 @@ export interface SessionState {
   brigade: { active: number; finished: number };
   lastTestsFailing: boolean;
   turn: number;
+  // Set by the PostCompact hook (whose own output cannot carry context — the
+  // schema rejects hookEventName "PostCompact"); cleared by the next
+  // PostToolUse or UserPromptSubmit hook after it relays the notes re-seed.
+  compactRecoveryPending: boolean;
 }
 
 const EMPTY_STATE: SessionState = {
   calls: [], reads: {}, failures: {}, progresslessCalls: 0, paralysisTripped: false,
   stopBlocks: 0, blocked: { loops: 0, dupReads: 0 }, compaction: { results: 0, savedChars: 0 },
-  brigade: { active: 0, finished: 0 }, lastTestsFailing: false, turn: 0,
+  brigade: { active: 0, finished: 0 }, lastTestsFailing: false, turn: 0, compactRecoveryPending: false,
 };
 
 export function statePath(cwd: string, sessionId: string): string {

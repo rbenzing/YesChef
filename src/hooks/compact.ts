@@ -1,7 +1,14 @@
 // PreCompact + PostCompact (one entry, dispatched on hook_event_name):
 // after compaction, earlier file reads may no longer be in context, so the
-// duplicate-read guard must reset; the mise notes summary gets re-seeded.
-import { readHookInput, emit, emitNothing, loadConfig, loadState, saveState, logEvent } from "../lib/core.js";
+// duplicate-read guard must reset.
+//
+// NOTE: Claude Code's hook-output schema accepts NO hookSpecificOutput for
+// compact events — hookEventName "PostCompact" fails validation (confirmed
+// empirically 2026-09; only PreToolUse/UserPromptSubmit/PostToolUse/
+// PostToolBatch/Stop variants carry additionalContext). So the mise-notes
+// recovery is NOT emitted here: we set state.compactRecoveryPending and the
+// next PostToolUse or UserPromptSubmit hook relays it, whichever fires first.
+import { readHookInput, emitNothing, loadConfig, loadState, saveState, logEvent } from "../lib/core.js";
 import { notesSummary, maybeCompact } from "../lib/notes.js";
 
 const input = readHookInput();
@@ -22,18 +29,11 @@ try {
   const state = loadState(cwd, sessionId);
   state.reads = {};
   state.calls = [];
+  // Flag the re-seed for the relay hooks only when there are notes worth
+  // re-seeding; the relay regenerates the summary at emit time.
+  if (notesSummary(cwd)) state.compactRecoveryPending = true;
   saveState(cwd, sessionId, state);
   if (cfg.telemetry.enabled) logEvent(cwd, sessionId, "post-compact", {});
-
-  const summary = notesSummary(cwd);
-  if (summary) {
-    emit({
-      hookSpecificOutput: {
-        hookEventName: event || "PostCompact",
-        additionalContext: `[yeschef] context was compacted. Your mise en place survives:\n${summary}\nFull notes: mcp__yeschef__notes(action:"read").`,
-      },
-    });
-  }
   emitNothing();
 } catch {
   emitNothing();

@@ -163,6 +163,17 @@ export function maybeCompact(cwd: string, threshold: number): number {
   return saved;
 }
 
+/** The post-compaction re-seed message, or null when there are no notes worth
+ * re-seeding. Built here so the two relay hooks (post-tool, user-prompt) can't
+ * drift apart — the PostCompact hook itself cannot emit context (Claude Code's
+ * output schema rejects hookEventName "PostCompact"), so it sets
+ * state.compactRecoveryPending and whichever relay fires first sends this. */
+export function compactRecoveryContext(cwd: string): string | null {
+  const summary = notesSummary(cwd);
+  if (!summary) return null;
+  return `[yeschef] context was compacted. Your mise en place survives:\n${summary}\nFull notes: mcp__yeschef__notes(action:"read").`;
+}
+
 /** Short summary for re-injection: goal + open plan items + last few discoveries. */
 export function notesSummary(cwd: string, maxChars = 1200): string {
   const text = readNotes(cwd);

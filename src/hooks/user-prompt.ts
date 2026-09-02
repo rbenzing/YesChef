@@ -1,6 +1,7 @@
 // UserPromptSubmit: BouzéCode's "bigctx-reminder" — ~70 fresh tokens, every turn,
 // stable wording. Plus budget status and a stall hint when warranted.
 import { readHookInput, emit, emitNothing, loadConfig, loadState, saveState, readUsage, estimateCostUSD } from "../lib/core.js";
+import { compactRecoveryContext } from "../lib/notes.js";
 
 const REMINDER =
   `[yeschef] Batch all independent discovery/read calls into ONE message. Reference earlier reads by file:line — never re-dump. ` +
@@ -16,10 +17,18 @@ try {
   state.turn += 1;
   // a fresh user prompt is new information — reset stall accounting
   state.stopBlocks = 0;
-  saveState(cwd, sessionId, state);
 
   const parts: string[] = [];
   if (cfg.reminder.enabled) parts.push(REMINDER);
+
+  // Deferred post-compaction re-seed: the PostCompact hook cannot emit context
+  // (the output schema rejects its hookEventName), so it flags us instead.
+  if (state.compactRecoveryPending) {
+    state.compactRecoveryPending = false;
+    const recovery = compactRecoveryContext(cwd);
+    if (recovery) parts.push(recovery);
+  }
+  saveState(cwd, sessionId, state);
 
   // Coerce and validate: a string "5" from hand-edited JSON would crash .toFixed
   // (swallowed by the catch, silently killing the reminder too); usd <= 0 means off.

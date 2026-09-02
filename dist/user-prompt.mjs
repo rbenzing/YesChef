@@ -89,7 +89,8 @@ var EMPTY_STATE = {
   compaction: { results: 0, savedChars: 0 },
   brigade: { active: 0, finished: 0 },
   lastTestsFailing: false,
-  turn: 0
+  turn: 0,
+  compactRecoveryPending: false
 };
 function statePath(cwd2, sessionId2) {
   return join(ensureDir(stateDir(cwd2)), `${sessionId2.replace(/[^\w-]/g, "")}.json`);
@@ -196,6 +197,72 @@ function estimateCostUSD(u, pricing = DEFAULTS.pricing) {
   return costOfBuckets(u.buckets, u.model, pricing);
 }
 
+// src/lib/notes.ts
+import { readFileSync as readFileSync2, writeFileSync as writeFileSync2, existsSync as existsSync2 } from "node:fs";
+import { join as join2 } from "node:path";
+var KITCHEN_ID = "kitchen";
+var SECTION_HEADER_RE = /^##\s+(\w+)/;
+function notesPath(cwd2) {
+  return join2(ensureDir(stateDir(cwd2)), `notes-${KITCHEN_ID}.md`);
+}
+var TEMPLATE = `# Mise en place
+## goal
+(unset \u2014 write one sentence)
+## plan
+## discoveries
+## decisions
+`;
+function readNotes(cwd2) {
+  const p = notesPath(cwd2);
+  if (!existsSync2(p)) return TEMPLATE;
+  try {
+    return readFileSync2(p, "utf8");
+  } catch {
+    return TEMPLATE;
+  }
+}
+function splitSections(text) {
+  const out = /* @__PURE__ */ Object.create(null);
+  let current = "_preamble";
+  out[current] = [];
+  for (const line of text.split("\n")) {
+    const m = line.match(SECTION_HEADER_RE);
+    if (m) {
+      current = m[1].toLowerCase();
+      out[current] = out[current] ?? [];
+      continue;
+    }
+    out[current].push(line);
+  }
+  return out;
+}
+function openPlanItems(text) {
+  const sections = splitSections(text);
+  return (sections["plan"] ?? []).filter((l) => /^\s*-\s*\[ \]/.test(l)).map((l) => l.replace(/^\s*-\s*\[ \]\s*/, "").trim());
+}
+function compactRecoveryContext(cwd2) {
+  const summary = notesSummary(cwd2);
+  if (!summary) return null;
+  return `[yeschef] context was compacted. Your mise en place survives:
+${summary}
+Full notes: mcp__yeschef__notes(action:"read").`;
+}
+function notesSummary(cwd2, maxChars = 1200) {
+  const text = readNotes(cwd2);
+  const sections = splitSections(text);
+  const goal = (sections["goal"] ?? []).map((l) => l.trim()).filter((l) => l && !l.startsWith("(unset")).join(" ");
+  const open = openPlanItems(text);
+  const disc = (sections["discoveries"] ?? []).map((l) => l.trim()).filter(Boolean).slice(-5);
+  const parts = [
+    goal ? `Goal: ${goal}` : "",
+    open.length ? `Open plan items:
+${open.slice(0, 8).map((i) => `- [ ] ${i}`).join("\n")}` : "",
+    disc.length ? `Recent discoveries:
+${disc.map((d) => `- ${d}`).join("\n")}` : ""
+  ].filter(Boolean);
+  return parts.join("\n").slice(0, maxChars);
+}
+
 // src/hooks/user-prompt.ts
 var REMINDER = `[yeschef] Batch all independent discovery/read calls into ONE message. Reference earlier reads by file:line \u2014 never re-dump. Bulk exploration \u2192 scout subagent. Keep mcp__yeschef__notes current; check off finished plan items. Think \u226415 lines, then act.`;
 var input = readHookInput();
@@ -206,9 +273,14 @@ try {
   const state = loadState(cwd, sessionId);
   state.turn += 1;
   state.stopBlocks = 0;
-  saveState(cwd, sessionId, state);
   const parts = [];
   if (cfg.reminder.enabled) parts.push(REMINDER);
+  if (state.compactRecoveryPending) {
+    state.compactRecoveryPending = false;
+    const recovery = compactRecoveryContext(cwd);
+    if (recovery) parts.push(recovery);
+  }
+  saveState(cwd, sessionId, state);
   const usd = Number(cfg.budget.usd);
   if (Number.isFinite(usd) && usd > 0) {
     const usage = readUsage(input.transcript_path);

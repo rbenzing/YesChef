@@ -13,14 +13,6 @@ function readHookInput() {
     return {};
   }
 }
-function emit(output) {
-  try {
-    process.stdout._handle?.setBlocking?.(true);
-  } catch {
-  }
-  process.stdout.write(JSON.stringify(output));
-  process.exit(0);
-}
 function emitNothing() {
   process.exit(0);
 }
@@ -89,7 +81,8 @@ var EMPTY_STATE = {
   compaction: { results: 0, savedChars: 0 },
   brigade: { active: 0, finished: 0 },
   lastTestsFailing: false,
-  turn: 0
+  turn: 0,
+  compactRecoveryPending: false
 };
 function statePath(cwd2, sessionId2) {
   return join(ensureDir(stateDir(cwd2)), `${sessionId2.replace(/[^\w-]/g, "")}.json`);
@@ -260,19 +253,9 @@ try {
   const state = loadState(cwd, sessionId);
   state.reads = {};
   state.calls = [];
+  if (notesSummary(cwd)) state.compactRecoveryPending = true;
   saveState(cwd, sessionId, state);
   if (cfg.telemetry.enabled) logEvent(cwd, sessionId, "post-compact", {});
-  const summary = notesSummary(cwd);
-  if (summary) {
-    emit({
-      hookSpecificOutput: {
-        hookEventName: event || "PostCompact",
-        additionalContext: `[yeschef] context was compacted. Your mise en place survives:
-${summary}
-Full notes: mcp__yeschef__notes(action:"read").`
-      }
-    });
-  }
   emitNothing();
 } catch {
   emitNothing();

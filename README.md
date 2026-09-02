@@ -46,7 +46,7 @@ Agentic context grows quadratically: every turn resends the whole history, so a 
 **From the Claude Code plugin marketplace:**
 
 ```
-/plugin marketplace add russellbenzing/yeschef
+/plugin marketplace add rbenzing/YesChef
 /plugin install yeschef@yeschef
 ```
 

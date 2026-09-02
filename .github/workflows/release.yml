@@ -1,0 +1,54 @@
+name: Release
+
+# One workflow, two duties, because the README build badge reads this file:
+#  - every push/PR to main runs the verify job (type-check + build + tests),
+#    so the badge reflects the health of the default branch;
+#  - a v* tag additionally packages the plugin and publishes a GitHub release.
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Verify (type-check, build, test)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      # No lockfile is committed, so `npm ci` is not an option here.
+      - run: npm install --no-audit --no-fund
+      - run: npm run verify
+
+  release:
+    name: Publish GitHub release
+    needs: verify
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Tag must match the plugin version
+        run: |
+          expected="v$(node -p "require('./package.json').version")"
+          if [ "$GITHUB_REF_NAME" != "$expected" ]; then
+            echo "Tag $GITHUB_REF_NAME does not match package.json version ($expected)" >&2
+            exit 1
+          fi
+      - name: Package plugin
+        # Same tree a marketplace install clones; dist/ is committed, so the
+        # archive is runnable as-is.
+        run: git archive --format=zip --prefix=yeschef/ -o "yeschef-$GITHUB_REF_NAME.zip" HEAD
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" "yeschef-$GITHUB_REF_NAME.zip" --title "YesChef $GITHUB_REF_NAME" --generate-notes

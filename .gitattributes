@@ -1,0 +1,11 @@
+# dist/ is committed build output. esbuild always emits LF, so normalize it in
+# the working tree too — otherwise a rebuild on Windows shows all bundles as
+# modified (CRLF) and masks real drift from the stale-dist CI gate.
+* text=auto eol=lf
+*.mjs text eol=lf
+dist/** text eol=lf
+
+# Binary / non-text
+*.png binary
+*.jpg binary
+*.zip binary

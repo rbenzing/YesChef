@@ -1,9 +1,17 @@
 name: Release
 
 # One workflow, two duties, because the README build badge reads this file:
-#  - every push/PR to main runs the verify job (type-check + build + tests),
-#    so the badge reflects the health of the default branch;
-#  - a v* tag additionally packages the plugin and publishes a GitHub release.
+#  - every push/PR to main runs the verify job (type-check + build + tests +
+#    manifest validation + a stale-dist check), so the badge reflects the
+#    health of the default branch;
+#  - a v* tag additionally publishes a GitHub release for changelog/audit.
+#
+# NOTE ON DISTRIBUTION: marketplace.json uses "source": "./", which Claude Code
+# resolves to the DEFAULT BRANCH — a git clone, not a release asset. Tags and
+# release ZIPs are therefore documentation, not a delivery channel. What
+# actually ships an update to users is bumping `version` in
+# .claude-plugin/plugin.json: users only receive updates when that field
+# changes. Keep it in sync with package.json (enforced below).
 
 on:
   push:
@@ -24,9 +32,39 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-      # No lockfile is committed, so `npm ci` is not an option here.
-      - run: npm install --no-audit --no-fund
+          cache: npm
+      # package-lock.json IS committed, so use the reproducible install.
+      - run: npm ci --no-audit --no-fund
       - run: npm run verify
+
+      - name: Plugin version must match package.json
+        run: |
+          plugin="$(node -p "require('./.claude-plugin/plugin.json').version")"
+          pkg="$(node -p "require('./package.json').version")"
+          if [ "$plugin" != "$pkg" ]; then
+            echo "::error::Version mismatch: .claude-plugin/plugin.json=$plugin vs package.json=$pkg" >&2
+            exit 1
+          fi
+          echo "version: $plugin"
+
+      # dist/ is committed and executed directly by users' hooks, so a stale
+      # bundle ships broken code. `npm run verify` already rebuilt it above;
+      # if that changed any tracked file, the commit was stale.
+      - name: dist/ must be up to date with src/
+        run: |
+          if ! git diff --quiet -- dist; then
+            echo "::error::Committed dist/ is stale. Run 'npm run build' and commit dist/." >&2
+            git diff --stat -- dist >&2
+            exit 1
+          fi
+          echo "dist/ is current"
+
+      # Manifest schema check (catches bad plugin.json/marketplace.json before
+      # users hit it). Non-blocking: this pulls the Claude Code CLI from npm, so
+      # a registry hiccup or CLI change must not fail an otherwise-good build.
+      - name: Validate plugin and marketplace manifests
+        continue-on-error: true
+        run: npx --yes @anthropic-ai/claude-code@2 plugin validate . --strict
 
   release:
     name: Publish GitHub release
@@ -39,16 +77,20 @@ jobs:
       - uses: actions/checkout@v4
       - name: Tag must match the plugin version
         run: |
-          expected="v$(node -p "require('./package.json').version")"
+          expected="v$(node -p "require('./.claude-plugin/plugin.json').version")"
           if [ "$GITHUB_REF_NAME" != "$expected" ]; then
-            echo "Tag $GITHUB_REF_NAME does not match package.json version ($expected)" >&2
+            echo "::error::Tag $GITHUB_REF_NAME does not match plugin version ($expected)" >&2
             exit 1
           fi
       - name: Package plugin
-        # Same tree a marketplace install clones; dist/ is committed, so the
-        # archive is runnable as-is.
+        # Convenience artifact for manual/offline installs only — the
+        # marketplace never fetches this (see note at top of file).
         run: git archive --format=zip --prefix=yeschef/ -o "yeschef-$GITHUB_REF_NAME.zip" HEAD
       - name: Create release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" "yeschef-$GITHUB_REF_NAME.zip" --title "YesChef $GITHUB_REF_NAME" --generate-notes
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            "yeschef-$GITHUB_REF_NAME.zip" \
+            --title "YesChef $GITHUB_REF_NAME" \
+            --generate-notes

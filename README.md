@@ -127,11 +127,35 @@ Session state and telemetry live under `~/.claude/yeschef/` — nothing is writt
 ## Development
 
 ```
-npm install
+npm ci
 npm run verify   # type-check + build dist/ + run tests (incl. hook smoke tests)
 ```
 
-`dist/` is committed on purpose: marketplace installs are git clones with no install step. Test locally with `claude --plugin-dir .` from a scratch project.
+`dist/` is committed on purpose: marketplace installs are git clones with no
+install step. Rebuild and commit `dist/` with any `src/` change — CI fails if the
+committed bundles are stale. Test locally with `claude --plugin-dir .` from a
+scratch project, and validate the manifests with `claude plugin validate . --strict`.
+
+### Releasing
+
+Marketplace entries here use `"source": "./"`, which Claude Code resolves to the
+**default branch** — installs are git clones, not release downloads. Two
+consequences:
+
+- **Bumping `version` in `.claude-plugin/plugin.json` is what ships an update.**
+  Users only receive changes when that field changes, so a fix merged to `main`
+  without a version bump stays invisible to anyone who already installed.
+- **Tags and GitHub Releases are changelog/audit only.** The release ZIP is a
+  convenience artifact for manual installs; no installer fetches it.
+
+To cut a release:
+
+1. Bump `version` in **both** `.claude-plugin/plugin.json` and `package.json`
+   (CI enforces that they match).
+2. `npm run verify` and commit, including any rebuilt `dist/`.
+3. Tag and push: `git tag v0.2.0 && git push origin main --tags`.
+
+The tag must equal `v<plugin.json version>` or the release job fails.
 
 ---
 

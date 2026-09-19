@@ -317,6 +317,32 @@ export interface ModelUsage extends TokenBuckets {
   turns: number;           // usage-bearing turns attributed to this model
 }
 
+/**
+ * BouzeCode's headline metric counts tokens consumed by the TOP-TIER model, so
+ * YesChef adopts the same yardstick. Sonnet and Haiku are the delegated tiers;
+ * anything unrecognised counts as top-tier, so an unclassified model can never
+ * flatter the number.
+ */
+export function isTopTierModel(model: string | null | undefined): boolean {
+  const m = (model ?? "").toLowerCase();
+  if (!m) return true;
+  return !/haiku|sonnet/.test(m);
+}
+
+/**
+ * Tokens processed, split on the two levers that are easy to confuse:
+ *   - tier   (top vs cheap)  — DELEGATION. The only thing that moves BouzeCode's metric.
+ *   - thread (main vs side)  — ISOLATION. Kills the quadratic tail, so it moves COST,
+ *                              but a subagent on the frontier model is still top-tier.
+ */
+export interface TierTokens {
+  topMain: number;
+  topSide: number;
+  cheapMain: number;
+  cheapSide: number;
+}
+const emptyTiers = (): TierTokens => ({ topMain: 0, topSide: 0, cheapMain: 0, cheapSide: 0 });
+
 // $/MTok prices and cache multipliers live in config (YesChefConfig.pricing,
 // overridable via ~/.claude/yeschef/config.json or <cwd>/.yeschef.json); the
 // cost functions default to DEFAULTS.pricing so callers without a config still work.
@@ -419,7 +445,12 @@ export function estimateCostUSD(u: UsageSnapshot, pricing: Pricing = DEFAULTS.pr
 }
 
 /** Accumulate every usage-bearing turn in a JSONL file into `models`, grouped by model. */
-function scanUsageInto(filePath: string, models: Record<string, ModelUsage>): { seen: boolean; contextTokensLast: number | null } {
+function scanUsageInto(
+  filePath: string,
+  models: Record<string, ModelUsage>,
+  tiers: TierTokens,
+  fromSubagentFile: boolean,
+): { seen: boolean; contextTokensLast: number | null } {
   let seen = false;
   let contextTokensLast: number | null = null;
   const lines = readFileSync(filePath, "utf8").split("\n");
@@ -434,6 +465,15 @@ function scanUsageInto(filePath: string, models: Record<string, ModelUsage>): { 
         const mu = models[model] ?? (models[model] = { ...emptyBuckets(), turns: 0 });
         addUsage(mu, u);
         mu.turns++;
+        const tok = (u.input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0)
+          + (u.cache_creation_input_tokens ?? 0) + (u.output_tokens ?? 0);
+        // Subagent turns carry isSidechain; the file's origin is the fallback.
+        const side = obj?.isSidechain === true || fromSubagentFile;
+        if (isTopTierModel(model)) {
+          if (side) tiers.topSide += tok; else tiers.topMain += tok;
+        } else {
+          if (side) tiers.cheapSide += tok; else tiers.cheapMain += tok;
+        }
         contextTokensLast = (u.input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0);
       }
     } catch { /* partial or non-JSON line */ }
@@ -453,21 +493,22 @@ function scanUsageInto(filePath: string, models: Record<string, ModelUsage>): { 
  */
 export function readUsageByModel(
   transcriptPath: string | undefined,
-): { models: Record<string, ModelUsage>; contextTokensLast: number | null } | null {
+): { models: Record<string, ModelUsage>; contextTokensLast: number | null; tiers: TierTokens } | null {
   if (!transcriptPath || !existsSync(transcriptPath)) return null;
   try {
     const models: Record<string, ModelUsage> = {};
-    const main = scanUsageInto(transcriptPath, models);
+    const tiers = emptyTiers();
+    const main = scanUsageInto(transcriptPath, models, tiers, false);
     let seen = main.seen;
     const subDir = join(transcriptPath.replace(/\.jsonl$/i, ""), "subagents");
     if (existsSync(subDir)) {
       for (const f of readdirSync(subDir)) {
         if (!f.endsWith(".jsonl")) continue;   // skip .meta.json siblings
-        try { if (scanUsageInto(join(subDir, f), models).seen) seen = true; } catch { /* skip unreadable */ }
+        try { if (scanUsageInto(join(subDir, f), models, tiers, true).seen) seen = true; } catch { /* skip unreadable */ }
       }
     }
     if (!seen) return null;
-    return { models, contextTokensLast: main.contextTokensLast };
+    return { models, contextTokensLast: main.contextTokensLast, tiers };
   } catch {
     return null;
   }

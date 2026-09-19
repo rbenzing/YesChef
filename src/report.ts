@@ -33,6 +33,8 @@ interface Tally {
   costSessions: number;
   modelUsage: Record<string, { inTok: number; cacheRead: number; cacheWrite: number; cacheWrite1h: number; out: number; turns: number; cost: number }>;
   modelCostSessions: number;           // cost sessions that carried a per-model breakdown
+  tiers: { topMain: number; topSide: number; cheapMain: number; cheapSide: number };
+  tierSessions: number;                // sessions that carried a tier split
   turns: number;                       // summed across ended sessions
   turnSessions: number;
   ctxTokensLast: number | null;        // most recent session-end context size
@@ -42,6 +44,7 @@ interface Tally {
 const t: Tally = {
   sessions: new Set(), loopsBlocked: 0, loopTools: {}, dupReadsBlocked: 0, dupReadFiles: {},
   compacted: 0, savedChars: 0, compactByKind: {}, ctxCompactions: 0, digestOps: 0, digestCalls: 0,
+  tiers: { topMain: 0, topSide: 0, cheapMain: 0, cheapSide: 0 }, tierSessions: 0,
   paralysis: 0, stopBlocks: 0, stopBlocksRed: 0, brigade: 0, brigadeByAgent: {},
   estCost: 0, costSessions: 0, modelUsage: {}, modelCostSessions: 0, turns: 0, turnSessions: 0, ctxTokensLast: null, firstTs: null, lastTs: null,
 };
@@ -83,6 +86,12 @@ for (const line of lines) {
           g.inTok += mu.inTok ?? 0; g.cacheRead += mu.cacheRead ?? 0; g.cacheWrite += mu.cacheWrite ?? 0;
           g.cacheWrite1h += mu.cacheWrite1h ?? 0;
           g.out += mu.out ?? 0; g.turns += mu.turns ?? 0; g.cost += mu.costUSD ?? 0;
+        }
+      }
+      if (e.tiers && typeof e.tiers === "object") {
+        t.tierSessions++;
+        for (const k of ["topMain", "topSide", "cheapMain", "cheapSide"] as const) {
+          t.tiers[k] += e.tiers[k] ?? 0;
         }
       }
       if (typeof e.turns === "number") { t.turns += e.turns; t.turnSessions++; }
@@ -139,6 +148,19 @@ if (modelRows.length) {
     console.log(`  ${model.padEnd(20)} $${v.cost.toFixed(2)}  (${Math.round((v.cost / totalCost) * 100)}%)  ·  ${num(ctx)} in+cache / ${num(v.out)} out tok · ${v.turns} turns`);
   }
   console.log(`  cache reads priced ${cfg.pricing.cacheReadMult}× of base input (0.025× on Fable/Mythos 5.1), writes ${cfg.pricing.cacheWriteMult}× (5m) / ${cfg.pricing.cacheWrite1hMult}× (1h); brigade (subagent) models included.`);
+}
+// BouzeCode's headline metric. Kept distinct from isolation on purpose: moving a
+// subagent off the main thread cuts the quadratic tail (cost), but a subagent still
+// running the frontier model does not move this number. Only delegation does.
+const tierTotal = t.tiers.topMain + t.tiers.topSide + t.tiers.cheapMain + t.tiers.cheapSide;
+if (tierTotal > 0) {
+  const share = (x: number) => ((x / tierTotal) * 100).toFixed(1) + "%";
+  const topTier = t.tiers.topMain + t.tiers.topSide;
+  const delegated = t.tiers.cheapMain + t.tiers.cheapSide;
+  const isolated = t.tiers.topSide + t.tiers.cheapSide;
+  console.log(`top-tier tokens        : ${num(topTier)}  (${share(topTier)} of all tokens processed)`);
+  console.log(`  delegated to cheaper models: ${share(delegated)}  ·  isolated in subagents: ${share(isolated)}`);
+  console.log(`  delegation moves the top-tier count; isolation moves cost. Across ${t.tierSessions} session(s).`);
 }
 if (t.costSessions > t.modelCostSessions) {
   const gap = t.costSessions - t.modelCostSessions;

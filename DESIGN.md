@@ -158,7 +158,29 @@ These are honest, structural limits of the plugin surface vs. owning the loop:
 | U5 | Stop-hook visibility into "is the task done" is heuristic (we read our own notes' plan checklist + recent failure state, not Claude's internal todo list) | false keep-cooking nudges | hard cap: 2 consecutive blocks, then stop is always allowed; dial to `warn`/`off` |
 | U6 | Exact token counts for budget guardrail (hooks don't receive usage) | estimates only | parse `transcript_path` JSONL tail for last `usage` block; report as "estimated" |
 | U7 | Whether two plugins' statuslines conflict (last-one-wins per docs) | cosmetic | documented; `/yeschef:report` carries the same data |
-| U8 | **YesChef's own token reduction is unmeasured.** No control-arm benchmark exists; `/yeschef:report` counts chars removed at compaction, which has no counterfactual. Independent testing of this tool class ([THOL](https://pi-infected.github.io/token-harness-optimizer-leaderboard/)) found most optimizers cluster near vanilla Claude Code | headline claim unsupportable | claim nothing first-party until the benchmark lands; cite BouzéCode's result as theirs, scoped |
+| U8 | **YesChef's own token *multiple* is still unmeasured.** PARTIALLY RESOLVED: `/yeschef:report` now reports BouzéCode's metric directly — top-tier tokens, plus delegation and isolation rates (see §5). That is a first-party statistic needing no baseline. A *multiple* still needs a control arm, which needs the benchmark. Independent testing of this tool class ([THOL](https://pi-infected.github.io/token-harness-optimizer-leaderboard/)) found most optimizers cluster near vanilla Claude Code | headline multiple unsupportable | report the share, not a multiple; cite BouzéCode's result as theirs, scoped |
+
+## 5. The metric: top-tier tokens
+
+YesChef adopts BouzéCode's yardstick — **tokens consumed by the top-tier model** —
+rather than inventing its own. `/yeschef:report` reports three numbers:
+
+| Number | What moves it |
+|---|---|
+| **top-tier tokens** (the metric) | delegation only — work running on Sonnet/Haiku instead of the frontier model |
+| delegated share | same lever, expressed as a fraction |
+| isolated share | subagent isolation — moves **cost** (no quadratic tail) but *not* the top-tier count |
+
+The third line exists to stop the first two being overstated. A subagent still running
+the frontier model is isolated but not delegated: it cuts the quadratic tail, so it is
+a real cost win, and it moves the top-tier number not at all. Measured on real
+sessions, this gap is wide — sessions exist at 100% top-tier with 15% isolated.
+
+Anything not recognised as Sonnet or Haiku counts as top-tier, so an unclassified
+model can never flatter the number.
+
+**This is a share, not a multiple.** Reporting "Nx fewer top-tier tokens" requires a
+vanilla-Claude-Code control arm; see U8.
 
 ## 4b. Beyond BouzéCode — three service modes
 

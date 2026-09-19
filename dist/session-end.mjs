@@ -136,6 +136,12 @@ function logEvent(cwd2, sessionId2, event, data = {}) {
   } catch {
   }
 }
+function isTopTierModel(model) {
+  const m = (model ?? "").toLowerCase();
+  if (!m) return true;
+  return !/haiku|sonnet/.test(m);
+}
+var emptyTiers = () => ({ topMain: 0, topSide: 0, cheapMain: 0, cheapSide: 0 });
 function matchBySubstring(model, table) {
   const m = (model ?? "").toLowerCase();
   for (const key of Object.keys(table).sort((a, b) => b.length - a.length)) {
@@ -164,7 +170,7 @@ function addUsage(b, u) {
   b.cacheWrite1h = (b.cacheWrite1h ?? 0) + (u.cache_creation?.ephemeral_1h_input_tokens ?? 0);
   b.out += u.output_tokens ?? 0;
 }
-function scanUsageInto(filePath, models) {
+function scanUsageInto(filePath, models, tiers, fromSubagentFile) {
   let seen = false;
   let contextTokensLast = null;
   const lines = readFileSync(filePath, "utf8").split("\n");
@@ -179,6 +185,15 @@ function scanUsageInto(filePath, models) {
         const mu = models[model] ?? (models[model] = { ...emptyBuckets(), turns: 0 });
         addUsage(mu, u);
         mu.turns++;
+        const tok = (u.input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0) + (u.output_tokens ?? 0);
+        const side = obj?.isSidechain === true || fromSubagentFile;
+        if (isTopTierModel(model)) {
+          if (side) tiers.topSide += tok;
+          else tiers.topMain += tok;
+        } else {
+          if (side) tiers.cheapSide += tok;
+          else tiers.cheapMain += tok;
+        }
         contextTokensLast = (u.input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0);
       }
     } catch {
@@ -190,20 +205,21 @@ function readUsageByModel(transcriptPath) {
   if (!transcriptPath || !existsSync(transcriptPath)) return null;
   try {
     const models = {};
-    const main = scanUsageInto(transcriptPath, models);
+    const tiers = emptyTiers();
+    const main = scanUsageInto(transcriptPath, models, tiers, false);
     let seen = main.seen;
     const subDir = join(transcriptPath.replace(/\.jsonl$/i, ""), "subagents");
     if (existsSync(subDir)) {
       for (const f of readdirSync(subDir)) {
         if (!f.endsWith(".jsonl")) continue;
         try {
-          if (scanUsageInto(join(subDir, f), models).seen) seen = true;
+          if (scanUsageInto(join(subDir, f), models, tiers, true).seen) seen = true;
         } catch {
         }
       }
     }
     if (!seen) return null;
-    return { models, contextTokensLast: main.contextTokensLast };
+    return { models, contextTokensLast: main.contextTokensLast, tiers };
   } catch {
     return null;
   }
@@ -256,6 +272,8 @@ try {
       compaction: state.compaction,
       brigade: state.brigade,
       contextTokens: usage?.contextTokensLast ?? null,
+      tiers: usage?.tiers ?? null,
+      // BouzeCode's metric: top-tier vs delegated tokens
       estCostUSD,
       perModel
     });

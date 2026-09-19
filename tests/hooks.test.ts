@@ -290,6 +290,17 @@ describe("session-end tally", () => {
     expect(end.turns).toBe(1);
     expect(end.estCostUSD).toBeCloseTo(0.5); // 100k uncached input × $5/MTok (Opus 4.8)
   });
+  // BouzeCode's metric is top-tier tokens, so session-end has to record the split,
+  // not just the per-model cost breakdown.
+  it("records the top-tier / delegated token split", () => {
+    runHook("session-end.mjs", { hook_event_name: "SessionEnd", transcript_path: transcriptWith(100_000) });
+    const log = readFileSync(join(home, "logs", `${slug(cwd)}.jsonl`), "utf8");
+    const end = log.split("\n").filter(Boolean).map((l) => JSON.parse(l)).find((e) => e.event === "session-end");
+    expect(end.tiers.topMain).toBe(100_000);   // Opus 4.8 on the main thread
+    expect(end.tiers.cheapMain).toBe(0);
+    expect(end.tiers.topSide).toBe(0);
+    expect(end.tiers.cheapSide).toBe(0);
+  });
 });
 
 describe("report and 86 CLIs", () => {
@@ -309,6 +320,17 @@ describe("report and 86 CLIs", () => {
     expect(out).toMatch(/duplicate reads blocked\s*:\s*1/);
     expect(out).toMatch(/brigade runs finished\s*:\s*1/);
     expect(out).toContain("$1.25");
+  });
+  it("report surfaces top-tier tokens and the delegation rate", () => {
+    mkdirSync(join(home, "logs"), { recursive: true });
+    writeFileSync(join(home, "logs", `${slug(cwd)}.jsonl`), [
+      { session: "s1", event: "session-end", estCostUSD: 1,
+        tiers: { topMain: 700, topSide: 100, cheapMain: 100, cheapSide: 100 } },
+    ].map((e) => JSON.stringify(e)).join("\n") + "\n");
+    const out = runCli("report.mjs");
+    expect(out).toMatch(/top-tier tokens/i);
+    expect(out).toContain("800");   // 700 + 100 on the frontier model
+    expect(out).toMatch(/20(.0)?%/); // 200 of 1000 tokens delegated to a cheaper tier
   });
   it("report survives a project with no telemetry", () => {
     expect(runCli("report.mjs")).toContain("No telemetry yet");

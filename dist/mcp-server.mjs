@@ -21713,7 +21713,7 @@ ${tail}` : "");
 // src/mcp/server.ts
 var cwd = process.env.CLAUDE_PROJECT_DIR || process.cwd();
 var cfg = loadConfig(cwd);
-var VERSION = true ? "0.2.0" : "0.0.0-dev";
+var VERSION = true ? "0.3.0" : "0.0.0-dev";
 var server = new McpServer({ name: "yeschef", version: VERSION });
 function text(s) {
   return { content: [{ type: "text", text: s }] };

@@ -44,6 +44,7 @@ try {
       compaction: state.compaction,
       brigade: state.brigade,
       contextTokens: usage?.contextTokensLast ?? null,
+      tiers: usage?.tiers ?? null,   // BouzeCode's metric: top-tier vs delegated tokens
       estCostUSD,
       perModel,
     });

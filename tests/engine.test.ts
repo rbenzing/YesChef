@@ -7,7 +7,7 @@ import { detectLoop, pushCall } from "../src/lib/loop.js";
 import { compactTestOutput, truncateGeneric, looksLikeTestCommand, extractResponseText, isTestFailure } from "../src/lib/compact.js";
 import { runBatchDigest } from "../src/lib/digest.js";
 import { buildFolderDescription } from "../src/lib/folderdesc.js";
-import { buildShellCommand, readUsage, estimateCostUSD } from "../src/lib/core.js";
+import { buildShellCommand, readUsage, estimateCostUSD, isTopTierModel, readUsageByModel } from "../src/lib/core.js";
 
 function tmp(): string {
   return mkdtempSync(join(tmpdir(), "yeschef-test-"));
@@ -328,6 +328,68 @@ describe("cost estimation (cache-aware, by model tier)", () => {
     expect(cost("claude-fable-5-1", { cacheRead: 1e6 })).toBeCloseTo(0.25);  // 10 × 0.025
     expect(cost("claude-mythos-5-1", { cacheRead: 1e6 })).toBeCloseTo(0.25); // 10 × 0.025
     expect(cost("claude-fable-5", { cacheRead: 1e6 })).toBeCloseTo(1);       // 10 × 0.1
+  });
+});
+
+// BouzeCode's headline metric counts tokens consumed by the TOP-TIER model. Adopting
+// it means YesChef has to tell frontier tokens apart from delegated ones, and main-thread
+// tokens apart from subagent ones - isolation and delegation are different levers.
+describe("model tier classification", () => {
+  it("counts the frontier family as top-tier", () => {
+    for (const m of ["claude-opus-5", "claude-opus-4-8", "claude-fable-5-1", "claude-mythos-5-1", "opus"])
+      expect(isTopTierModel(m)).toBe(true);
+  });
+  it("counts sonnet and haiku as delegated, not top-tier", () => {
+    for (const m of ["claude-sonnet-5", "claude-sonnet-4-6", "claude-haiku-4-5-20251001", "haiku", "sonnet"])
+      expect(isTopTierModel(m)).toBe(false);
+  });
+  it("treats an unknown model as top-tier, so the metric never flatters itself", () => {
+    expect(isTopTierModel("some-future-model")).toBe(true);
+    expect(isTopTierModel(null)).toBe(true);
+  });
+});
+
+describe("tier accounting across main and subagent transcripts", () => {
+  function fixture(): string {
+    const dir = tmp();
+    const main = join(dir, "transcript.jsonl");
+    const turn = (model: string, u: any) => JSON.stringify({ message: { model, usage: u } });
+    writeFileSync(main, [
+      turn("claude-opus-5", { input_tokens: 10, cache_read_input_tokens: 100, cache_creation_input_tokens: 20, output_tokens: 5 }),
+      turn("claude-haiku-4-5", { input_tokens: 1, output_tokens: 1 }),
+    ].join("\n") + "\n");
+    const sub = join(dir, "transcript", "subagents");
+    mkdirSync(sub, { recursive: true });
+    writeFileSync(join(sub, "agent-1.jsonl"), [
+      turn("claude-haiku-4-5", { input_tokens: 1000, output_tokens: 50 }),
+      turn("claude-opus-5", { input_tokens: 200, output_tokens: 10 }),
+    ].join("\n") + "\n");
+    return main;
+  }
+
+  it("splits tokens by tier and by thread", () => {
+    const u = readUsageByModel(fixture())!;
+    expect(u.tiers.topMain).toBe(135);     // 10 + 100 + 20 + 5
+    expect(u.tiers.cheapMain).toBe(2);     // 1 + 1
+    expect(u.tiers.topSide).toBe(210);     // 200 + 10, a subagent still on the frontier model
+    expect(u.tiers.cheapSide).toBe(1050);  // 1000 + 50, the scout absorbing bulk
+  });
+
+  it("reports the top-tier total that BouzeCode's metric counts", () => {
+    const u = readUsageByModel(fixture())!;
+    expect(u.tiers.topMain + u.tiers.topSide).toBe(345);
+  });
+
+  // Isolation moves work off the main thread but NOT off the frontier model. Only
+  // delegation to a cheaper model reduces the top-tier count, and the report must
+  // not conflate the two.
+  it("does not credit isolation as delegation", () => {
+    const u = readUsageByModel(fixture())!;
+    expect(u.tiers.topSide).toBeGreaterThan(0);
+    const delegated = u.tiers.cheapMain + u.tiers.cheapSide;
+    const topTier = u.tiers.topMain + u.tiers.topSide;
+    expect(delegated).toBe(1052);
+    expect(topTier).toBe(345);
   });
 });
 

@@ -19,7 +19,13 @@ import { loadConfig, overflowDir, logEvent, buildShellCommand, setTestStatus } f
 const cwd = process.env.CLAUDE_PROJECT_DIR || process.cwd();
 const cfg = loadConfig(cwd);
 
-const server = new McpServer({ name: "yeschef", version: "0.1.0" });
+// Injected by build.mjs from package.json so this can't drift from the plugin
+// manifest. `typeof` (not `??`) because the identifier is genuinely undeclared
+// when the file runs unbundled, e.g. under vitest.
+declare const __YESCHEF_VERSION__: string;
+const VERSION = typeof __YESCHEF_VERSION__ !== "undefined" ? __YESCHEF_VERSION__ : "0.0.0-dev";
+
+const server = new McpServer({ name: "yeschef", version: VERSION });
 
 function text(s: string) {
   return { content: [{ type: "text" as const, text: s }] };

@@ -1,7 +1,11 @@
 // Bundles every entry point into self-contained, zero-dependency dist/*.mjs files.
 // dist/ is committed so `/plugin install` works with no install step on the user's machine.
 import { build } from "esbuild";
-import { rmSync, mkdirSync } from "node:fs";
+import { rmSync, mkdirSync, readFileSync } from "node:fs";
+
+// Single source of truth for the version. CI already pins plugin.json to
+// package.json; injecting it here keeps the MCP server from drifting too.
+const { version } = JSON.parse(readFileSync("package.json", "utf8"));
 
 const entries = {
   "session-start": "src/hooks/session-start.ts",
@@ -32,6 +36,7 @@ for (const [name, entry] of Object.entries(entries)) {
     minify: false,
     sourcemap: false,
     banner: { js: "#!/usr/bin/env node" },
+    define: { __YESCHEF_VERSION__: JSON.stringify(version) },
     // node: built-ins stay external automatically under platform:"node"
   });
   console.log(`built dist/${name}.mjs`);

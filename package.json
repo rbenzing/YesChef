@@ -1,6 +1,6 @@
 {
   "name": "yeschef",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "YesChef — a kitchen-brigade AI harness plugin for Claude Code: token thrift, clean context, autonomous service.",
   "type": "module",
   "private": true,

@@ -28,12 +28,37 @@ var DEFAULTS = {
   duplicateRead: { ttlMinutes: 10, warnOn: 2, blockOn: 3 },
   stop: { maxConsecutiveBlocks: 2 },
   telemetry: { enabled: true },
+  // Rates verified against platform.claude.com/docs/en/about-claude/pricing (2026-09-18).
+  // Keys match as substrings of the model id, LONGEST key first. A bare family key is
+  // the current generation's rate, because Claude Code also writes bare aliases
+  // ("sonnet", "opus") into the transcript; older generations that are priced
+  // differently get their own, more specific key. Retired models are listed because
+  // they remain billable on partner clouds after first-party retirement.
   pricing: {
-    models: { haiku: [1, 5], sonnet: [3, 15], fable: [10, 50], mythos: [10, 50], opus: [5, 25] },
+    models: {
+      "haiku-3-5": [0.8, 4],
+      // retired (Bedrock/Google Cloud only)
+      haiku: [1, 5],
+      // Haiku 4.5
+      "sonnet-4": [3, 15],
+      // Sonnet 4.6 / 4.5 / 4
+      sonnet: [2, 10],
+      // Sonnet 5
+      fable: [10, 50],
+      mythos: [10, 50],
+      "opus-4-1": [15, 75],
+      // retired (Bedrock/Google Cloud only)
+      "opus-4-2025": [15, 75],
+      // Opus 4, dated id, retired (Google Cloud only)
+      opus: [5, 25]
+      // Opus 5 / 4.8 / 4.7 / 4.6 / 4.5
+    },
     default: [5, 25],
     // unknown model → Opus-tier
     cacheReadMult: 0.1,
-    cacheWriteMult: 1.25
+    cacheReadMultByModel: { "fable-5-1": 0.025, "mythos-5-1": 0.025 },
+    cacheWriteMult: 1.25,
+    cacheWrite1hMult: 2
   }
 };
 function deepMerge(base, over) {
@@ -165,10 +190,11 @@ for (const line of lines) {
       if (e.perModel && typeof e.perModel === "object") {
         t.modelCostSessions++;
         for (const [model, mu] of Object.entries(e.perModel)) {
-          const g = t.modelUsage[model] ?? (t.modelUsage[model] = { inTok: 0, cacheRead: 0, cacheWrite: 0, out: 0, turns: 0, cost: 0 });
+          const g = t.modelUsage[model] ?? (t.modelUsage[model] = { inTok: 0, cacheRead: 0, cacheWrite: 0, cacheWrite1h: 0, out: 0, turns: 0, cost: 0 });
           g.inTok += mu.inTok ?? 0;
           g.cacheRead += mu.cacheRead ?? 0;
           g.cacheWrite += mu.cacheWrite ?? 0;
+          g.cacheWrite1h += mu.cacheWrite1h ?? 0;
           g.out += mu.out ?? 0;
           g.turns += mu.turns ?? 0;
           g.cost += mu.costUSD ?? 0;
@@ -223,7 +249,7 @@ if (modelRows.length) {
     const ctx = v.inTok + v.cacheRead + v.cacheWrite;
     console.log(`  ${model.padEnd(20)} $${v.cost.toFixed(2)}  (${Math.round(v.cost / totalCost * 100)}%)  \xB7  ${num(ctx)} in+cache / ${num(v.out)} out tok \xB7 ${v.turns} turns`);
   }
-  console.log(`  cache reads priced ~${cfg.pricing.cacheReadMult}\xD7, writes ~${cfg.pricing.cacheWriteMult}\xD7 of base input; brigade (subagent) models included.`);
+  console.log(`  cache reads priced ${cfg.pricing.cacheReadMult}\xD7 of base input (0.025\xD7 on Fable/Mythos 5.1), writes ${cfg.pricing.cacheWriteMult}\xD7 (5m) / ${cfg.pricing.cacheWrite1hMult}\xD7 (1h); brigade (subagent) models included.`);
 }
 if (t.costSessions > t.modelCostSessions) {
   const gap = t.costSessions - t.modelCostSessions;

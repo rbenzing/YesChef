@@ -31,7 +31,7 @@ interface Tally {
   brigadeByAgent: Record<string, number>; // scout / line-cook / expeditor / researcher
   estCost: number;
   costSessions: number;
-  modelUsage: Record<string, { inTok: number; cacheRead: number; cacheWrite: number; out: number; turns: number; cost: number }>;
+  modelUsage: Record<string, { inTok: number; cacheRead: number; cacheWrite: number; cacheWrite1h: number; out: number; turns: number; cost: number }>;
   modelCostSessions: number;           // cost sessions that carried a per-model breakdown
   turns: number;                       // summed across ended sessions
   turnSessions: number;
@@ -79,8 +79,9 @@ for (const line of lines) {
       if (e.perModel && typeof e.perModel === "object") {
         t.modelCostSessions++;
         for (const [model, mu] of Object.entries<any>(e.perModel)) {
-          const g = t.modelUsage[model] ?? (t.modelUsage[model] = { inTok: 0, cacheRead: 0, cacheWrite: 0, out: 0, turns: 0, cost: 0 });
+          const g = t.modelUsage[model] ?? (t.modelUsage[model] = { inTok: 0, cacheRead: 0, cacheWrite: 0, cacheWrite1h: 0, out: 0, turns: 0, cost: 0 });
           g.inTok += mu.inTok ?? 0; g.cacheRead += mu.cacheRead ?? 0; g.cacheWrite += mu.cacheWrite ?? 0;
+          g.cacheWrite1h += mu.cacheWrite1h ?? 0;
           g.out += mu.out ?? 0; g.turns += mu.turns ?? 0; g.cost += mu.costUSD ?? 0;
         }
       }
@@ -137,7 +138,7 @@ if (modelRows.length) {
     const ctx = v.inTok + v.cacheRead + v.cacheWrite;
     console.log(`  ${model.padEnd(20)} $${v.cost.toFixed(2)}  (${Math.round((v.cost / totalCost) * 100)}%)  ·  ${num(ctx)} in+cache / ${num(v.out)} out tok · ${v.turns} turns`);
   }
-  console.log(`  cache reads priced ~${cfg.pricing.cacheReadMult}×, writes ~${cfg.pricing.cacheWriteMult}× of base input; brigade (subagent) models included.`);
+  console.log(`  cache reads priced ${cfg.pricing.cacheReadMult}× of base input (0.025× on Fable/Mythos 5.1), writes ${cfg.pricing.cacheWriteMult}× (5m) / ${cfg.pricing.cacheWrite1hMult}× (1h); brigade (subagent) models included.`);
 }
 if (t.costSessions > t.modelCostSessions) {
   const gap = t.costSessions - t.modelCostSessions;

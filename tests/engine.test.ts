@@ -273,21 +273,61 @@ describe("transcript usage (budget estimation)", () => {
     expect(u.buckets.out).toBe(30);      // 10 + 20 across blocks
     expect(u.model).toBe("claude-sonnet-5");
   });
+  // Claude Code splits cache writes by TTL under cache_creation; the 1h slice bills at
+  // 2x base input instead of 1.25x, so it has to survive into its own bucket.
+  it("captures the 1-hour slice of cache writes without double-counting the total", () => {
+    const p = join(tmp(), "transcript-ttl.jsonl");
+    writeFileSync(p, [
+      JSON.stringify({ message: { model: "claude-opus-5", usage: {
+        input_tokens: 10, output_tokens: 5, cache_creation_input_tokens: 1000,
+        cache_creation: { ephemeral_5m_input_tokens: 400, ephemeral_1h_input_tokens: 600 },
+      } } }),
+      JSON.stringify({ message: { model: "claude-opus-5", usage: {
+        input_tokens: 10, output_tokens: 5, cache_creation_input_tokens: 500,
+      } } }),   // no TTL breakdown → treated as 5-minute
+    ].join("\n") + "\n");
+    const u = readUsage(p)!;
+    expect(u.buckets.cacheWrite).toBe(1500);    // total across both blocks
+    expect(u.buckets.cacheWrite1h).toBe(600);   // subset billed at 2x
+    // 20 in x $5 + 5 out x $25 + 900 write @1.25x$5 + 600 write @2x$5 = per MTok
+    expect(estimateCostUSD(u)).toBeCloseTo((20 * 5 + 5 * 25 + 900 * 6.25 + 600 * 10) / 1e6);
+  });
 });
 
 describe("cost estimation (cache-aware, by model tier)", () => {
-  const cost = (model: string | null, b: Partial<{ inTok: number; cacheRead: number; cacheWrite: number; out: number }>) =>
+  const cost = (model: string | null, b: Partial<{ inTok: number; cacheRead: number; cacheWrite: number; cacheWrite1h: number; out: number }>) =>
     estimateCostUSD({ contextTokens: 0, model, buckets: { inTok: 0, cacheRead: 0, cacheWrite: 0, out: 0, ...b } });
   it("prices input + output per tier, defaulting unknown to Opus", () => {
     expect(cost("claude-haiku-4-5", { inTok: 1e6, out: 1e6 })).toBeCloseTo(6);   // 1 + 5
-    expect(cost("claude-sonnet-5", { inTok: 1e6, out: 1e6 })).toBeCloseTo(18);   // 3 + 15
+    expect(cost("claude-sonnet-5", { inTok: 1e6, out: 1e6 })).toBeCloseTo(12);   // 2 + 10
     expect(cost("claude-opus-4-8", { inTok: 1e6, out: 1e6 })).toBeCloseTo(30);   // 5 + 25
     expect(cost("claude-fable-5", { inTok: 1e6, out: 1e6 })).toBeCloseTo(60);    // 10 + 50
     expect(cost(null, { inTok: 1e6, out: 1e6 })).toBeCloseTo(30);
   });
-  it("discounts cache reads (~0.1×) and surcharges cache writes (~1.25×) vs base input", () => {
+  // Sonnet 5 is $2/$10 while Sonnet 4.6 and 4.5 stayed at $3/$15, so the specific
+  // key has to beat the family key regardless of declaration order.
+  it("matches the most specific model key, not the first one declared", () => {
+    expect(cost("claude-sonnet-5", { inTok: 1e6, out: 1e6 })).toBeCloseTo(12);   // 2 + 10
+    expect(cost("claude-sonnet-4-6", { inTok: 1e6, out: 1e6 })).toBeCloseTo(18); // 3 + 15
+    expect(cost("claude-sonnet-4-5", { inTok: 1e6, out: 1e6 })).toBeCloseTo(18); // 3 + 15
+    expect(cost("sonnet", { inTok: 1e6, out: 1e6 })).toBeCloseTo(12);            // bare alias → current gen
+    expect(cost("opus", { inTok: 1e6, out: 1e6 })).toBeCloseTo(30);              // bare alias → current gen
+    expect(cost("haiku", { inTok: 1e6, out: 1e6 })).toBeCloseTo(6);              // bare alias → current gen
+    expect(cost("claude-opus-4-1", { inTok: 1e6, out: 1e6 })).toBeCloseTo(90);   // 15 + 75
+    expect(cost("claude-opus-5", { inTok: 1e6, out: 1e6 })).toBeCloseTo(30);     // 5 + 25
+  });
+  it("discounts cache reads (0.1×) and surcharges cache writes (1.25× at 5m, 2× at 1h)", () => {
     expect(cost("claude-opus-4-8", { cacheRead: 1e6 })).toBeCloseTo(0.5);   // 5 × 0.1
-    expect(cost("claude-opus-4-8", { cacheWrite: 1e6 })).toBeCloseTo(6.25); // 5 × 1.25
+    expect(cost("claude-opus-4-8", { cacheWrite: 1e6 })).toBeCloseTo(6.25); // 5 × 1.25, no TTL split → 5m
+    // cacheWrite1h is a SUBSET of cacheWrite: 1M total of which 1M at the 1h rate.
+    expect(cost("claude-opus-4-8", { cacheWrite: 1e6, cacheWrite1h: 1e6 })).toBeCloseTo(10);   // 5 × 2
+    expect(cost("claude-opus-4-8", { cacheWrite: 2e6, cacheWrite1h: 1e6 })).toBeCloseTo(16.25); // 6.25 + 10
+  });
+  // Cache hits on Fable/Mythos 5.1 are 0.025× base input, not the usual 0.1×.
+  it("applies the Fable/Mythos 5.1 cache-read exception", () => {
+    expect(cost("claude-fable-5-1", { cacheRead: 1e6 })).toBeCloseTo(0.25);  // 10 × 0.025
+    expect(cost("claude-mythos-5-1", { cacheRead: 1e6 })).toBeCloseTo(0.25); // 10 × 0.025
+    expect(cost("claude-fable-5", { cacheRead: 1e6 })).toBeCloseTo(1);       // 10 × 0.1
   });
 });
 

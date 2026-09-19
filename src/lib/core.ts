@@ -85,10 +85,12 @@ export interface YesChefConfig {
   stop: { maxConsecutiveBlocks: number };
   telemetry: { enabled: boolean };
   pricing: {
-    models: Record<string, [number, number]>;  // model-id substring → [inputUSD/MTok, outputUSD/MTok]; first match wins
+    models: Record<string, [number, number]>;  // model-id substring → [inputUSD/MTok, outputUSD/MTok]; longest key wins
     default: [number, number];                  // unknown model → this pair
-    cacheReadMult: number;                       // cache-hit input multiplier (~0.1)
-    cacheWriteMult: number;                      // cache-write input multiplier (~1.25 for the 5-minute cache)
+    cacheReadMult: number;                       // cache-hit input multiplier (0.1 for every model but the 5.1 pair)
+    cacheReadMultByModel: Record<string, number>; // substring → cache-hit multiplier override; longest key wins
+    cacheWriteMult: number;                      // 5-minute cache-write input multiplier (1.25)
+    cacheWrite1hMult: number;                    // 1-hour cache-write input multiplier (2)
   };
 }
 
@@ -105,11 +107,28 @@ export const DEFAULTS: YesChefConfig = {
   duplicateRead: { ttlMinutes: 10, warnOn: 2, blockOn: 3 },
   stop: { maxConsecutiveBlocks: 2 },
   telemetry: { enabled: true },
+  // Rates verified against platform.claude.com/docs/en/about-claude/pricing (2026-09-18).
+  // Keys match as substrings of the model id, LONGEST key first. A bare family key is
+  // the current generation's rate, because Claude Code also writes bare aliases
+  // ("sonnet", "opus") into the transcript; older generations that are priced
+  // differently get their own, more specific key. Retired models are listed because
+  // they remain billable on partner clouds after first-party retirement.
   pricing: {
-    models: { haiku: [1, 5], sonnet: [3, 15], fable: [10, 50], mythos: [10, 50], opus: [5, 25] },
+    models: {
+      "haiku-3-5": [0.8, 4],        // retired (Bedrock/Google Cloud only)
+      haiku: [1, 5],                // Haiku 4.5
+      "sonnet-4": [3, 15],          // Sonnet 4.6 / 4.5 / 4
+      sonnet: [2, 10],              // Sonnet 5
+      fable: [10, 50], mythos: [10, 50],
+      "opus-4-1": [15, 75],         // retired (Bedrock/Google Cloud only)
+      "opus-4-2025": [15, 75],      // Opus 4, dated id, retired (Google Cloud only)
+      opus: [5, 25],                // Opus 5 / 4.8 / 4.7 / 4.6 / 4.5
+    },
     default: [5, 25],   // unknown model → Opus-tier
     cacheReadMult: 0.1,
+    cacheReadMultByModel: { "fable-5-1": 0.025, "mythos-5-1": 0.025 },
     cacheWriteMult: 1.25,
+    cacheWrite1hMult: 2,
   },
 };
 
@@ -281,10 +300,11 @@ export function hashCall(toolName: string, toolInput: any): string {
 // ---------- transcript usage (estimated budget) ----------
 
 export interface TokenBuckets {
-  inTok: number;      // uncached input tokens (billed 1×)
-  cacheRead: number;  // cache-hit tokens (billed ~0.1×)
-  cacheWrite: number; // cache-write tokens (billed ~1.25× for the 5-minute cache)
-  out: number;        // output tokens
+  inTok: number;        // uncached input tokens (billed 1×)
+  cacheRead: number;    // cache-hit tokens (billed 0.1× base input; 0.025× on Fable/Mythos 5.1)
+  cacheWrite: number;   // ALL cache-write tokens, both TTLs
+  cacheWrite1h?: number; // of which 1-hour-TTL writes, billed 2× instead of 1.25×; absent in pre-existing telemetry
+  out: number;          // output tokens
 }
 
 export interface UsageSnapshot {
@@ -302,31 +322,46 @@ export interface ModelUsage extends TokenBuckets {
 // cost functions default to DEFAULTS.pricing so callers without a config still work.
 export type Pricing = YesChefConfig["pricing"];
 
-export function priceFor(model: string | null, pricing: Pricing = DEFAULTS.pricing): { in: number; out: number } {
+/** Match a model id against substring keys, longest key first so "sonnet-5" beats "sonnet". */
+function matchBySubstring<T>(model: string | null, table: Record<string, T>): T | undefined {
   const m = (model ?? "").toLowerCase();
-  for (const [key, [inP, outP]] of Object.entries(pricing.models)) {
-    if (m.includes(key)) return { in: inP, out: outP };
+  for (const key of Object.keys(table).sort((a, b) => b.length - a.length)) {
+    if (m.includes(key)) return table[key];
   }
-  const [inP, outP] = pricing.default;
+  return undefined;
+}
+
+export function priceFor(model: string | null, pricing: Pricing = DEFAULTS.pricing): { in: number; out: number } {
+  const [inP, outP] = matchBySubstring(model, pricing.models) ?? pricing.default;
   return { in: inP, out: outP };
+}
+
+/** Cache-hit multiplier: 0.1× of base input everywhere except Claude Fable/Mythos 5.1 (0.025×). */
+export function cacheReadMultFor(model: string | null, pricing: Pricing = DEFAULTS.pricing): number {
+  return matchBySubstring(model, pricing.cacheReadMultByModel ?? {}) ?? pricing.cacheReadMult;
 }
 
 /** Cache-aware cost of a token bucket at a model's rates. Estimate only, not billing data. */
 export function costOfBuckets(b: TokenBuckets, model: string | null, pricing: Pricing = DEFAULTS.pricing): number {
   const { in: rIn, out: rOut } = priceFor(model, pricing);
+  const write1h = Math.min(b.cacheWrite1h ?? 0, b.cacheWrite);
+  const write5m = b.cacheWrite - write1h;
   return (
     b.inTok * rIn +
-    b.cacheRead * rIn * pricing.cacheReadMult +
-    b.cacheWrite * rIn * pricing.cacheWriteMult +
+    b.cacheRead * rIn * cacheReadMultFor(model, pricing) +
+    write5m * rIn * pricing.cacheWriteMult +
+    write1h * rIn * (pricing.cacheWrite1hMult ?? pricing.cacheWriteMult) +
     b.out * rOut
   ) / 1e6;
 }
 
-const emptyBuckets = (): TokenBuckets => ({ inTok: 0, cacheRead: 0, cacheWrite: 0, out: 0 });
+const emptyBuckets = (): TokenBuckets => ({ inTok: 0, cacheRead: 0, cacheWrite: 0, cacheWrite1h: 0, out: 0 });
 function addUsage(b: TokenBuckets, u: any): void {
   b.inTok += u.input_tokens ?? 0;
   b.cacheRead += u.cache_read_input_tokens ?? 0;
   b.cacheWrite += u.cache_creation_input_tokens ?? 0;
+  // Claude Code reports the TTL split under cache_creation; 1-hour writes bill at 2×, not 1.25×.
+  b.cacheWrite1h = (b.cacheWrite1h ?? 0) + (u.cache_creation?.ephemeral_1h_input_tokens ?? 0);
   b.out += u.output_tokens ?? 0;
 }
 

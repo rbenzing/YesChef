@@ -32,7 +32,7 @@ try {
         const cost = costOfBuckets(mu, model, cfg.pricing);
         total += cost;
         perModel[model] = {
-          inTok: mu.inTok, cacheRead: mu.cacheRead, cacheWrite: mu.cacheWrite,
+          inTok: mu.inTok, cacheRead: mu.cacheRead, cacheWrite: mu.cacheWrite, cacheWrite1h: mu.cacheWrite1h ?? 0,
           out: mu.out, turns: mu.turns, costUSD: Number(cost.toFixed(4)),
         };
       }

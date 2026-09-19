@@ -6,7 +6,8 @@
 
 The methodology is ported from **BouzéCode** ([site](https://simon-free.github.io/bouzecode/),
 [repo](https://github.com/Simon-Free/bouzecode), Apache-2.0), a standalone agent
-harness that demonstrated ~10x token reduction at equal model capability. BouzéCode
+harness whose author reports ~10x fewer top-tier-model tokens at equal capability —
+an informal n=5 result the project labels "signals, not benchmarks". BouzéCode
 owns its entire agent loop; YesChef re-expresses the same levers inside the
 extension surface Claude Code actually offers a plugin: **hooks, MCP tools,
 subagents, skills, commands, workflows, statusline**.
@@ -157,6 +158,7 @@ These are honest, structural limits of the plugin surface vs. owning the loop:
 | U5 | Stop-hook visibility into "is the task done" is heuristic (we read our own notes' plan checklist + recent failure state, not Claude's internal todo list) | false keep-cooking nudges | hard cap: 2 consecutive blocks, then stop is always allowed; dial to `warn`/`off` |
 | U6 | Exact token counts for budget guardrail (hooks don't receive usage) | estimates only | parse `transcript_path` JSONL tail for last `usage` block; report as "estimated" |
 | U7 | Whether two plugins' statuslines conflict (last-one-wins per docs) | cosmetic | documented; `/yeschef:report` carries the same data |
+| U8 | **YesChef's own token reduction is unmeasured.** No control-arm benchmark exists; `/yeschef:report` counts chars removed at compaction, which has no counterfactual. Independent testing of this tool class ([THOL](https://pi-infected.github.io/token-harness-optimizer-leaderboard/)) found most optimizers cluster near vanilla Claude Code | headline claim unsupportable | claim nothing first-party until the benchmark lands; cite BouzéCode's result as theirs, scoped |
 
 ## 4b. Beyond BouzéCode — three service modes
 

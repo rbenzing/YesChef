@@ -11,7 +11,7 @@
 
 **A kitchen-brigade AI harness for Claude Code — token thrift, clean context, autonomous service.**
 
-YesChef ports the methodology of [BouzéCode](https://simon-free.github.io/bouzecode/) — a standalone harness that demonstrated ~10x token reduction at equal model capability — into a Claude Code plugin: disciplined hooks, a bundled MCP server for token-cheap tools, a subagent brigade for context isolation, and scripted workflows for orchestration. See [DESIGN.md](DESIGN.md) for the methodology mapping and tracked unknowns.
+YesChef ports the methodology of [BouzéCode](https://simon-free.github.io/bouzecode/) — a standalone harness whose author reports ~10x fewer top-tier-model tokens on an informal 5-task trial — into a Claude Code plugin: disciplined hooks, a bundled MCP server for token-cheap tools, a subagent brigade for context isolation, and scripted workflows for orchestration. **YesChef's own reduction is not yet measured** — BouzéCode owns its whole agent loop, and a plugin cannot rewrite message history or force tool calls, so expect a smaller multiple. See [DESIGN.md](DESIGN.md) for the methodology mapping, structural gaps, and tracked unknowns.
 
 [Features](#-features) • [Install](#-install) • [What's in the kitchen](#-whats-in-the-kitchen) • [Configuration](#-configuration) • [Development](#-development) • [License](#-license)
 

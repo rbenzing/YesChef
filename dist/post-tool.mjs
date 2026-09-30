@@ -363,7 +363,7 @@ function compactRecoveryContext(cwd2) {
   if (!summary) return null;
   return `[yeschef] context was compacted. Your mise en place survives:
 ${summary}
-Full notes: mcp__yeschef__notes(action:"read").`;
+Full notes: mcp__plugin_yeschef_yeschef__notes(action:"read").`;
 }
 function notesSummary(cwd2, maxChars = 1200) {
   const text = readNotes(cwd2);
@@ -406,7 +406,7 @@ try {
     state.failures[key] = (state.failures[key] ?? 0) + 1;
     const n = state.failures[key];
     if (n === 2) contexts.push(`[yeschef] '${key.slice(0, 60)}' failed twice in a row. Read the full error before retrying \u2014 what EXACTLY does it say? Check assumptions (paths, env, versions).`);
-    if (n >= 3) contexts.push(`[yeschef] '${key.slice(0, 60)}' has failed ${n}x. STOP retrying it. Change approach: re-read the failing code, add a diagnostic, or delegate a focused investigation to scout. Note the blocker in mcp__yeschef__notes.`);
+    if (n >= 3) contexts.push(`[yeschef] '${key.slice(0, 60)}' has failed ${n}x. STOP retrying it. Change approach: re-read the failing code, add a diagnostic, or delegate a focused investigation to scout. Note the blocker in mcp__plugin_yeschef_yeschef__notes.`);
   };
   const applyCompaction = (r, rebuild, kind) => {
     if (r.kind === "unchanged") return;

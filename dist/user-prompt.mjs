@@ -279,7 +279,7 @@ function compactRecoveryContext(cwd2) {
   if (!summary) return null;
   return `[yeschef] context was compacted. Your mise en place survives:
 ${summary}
-Full notes: mcp__yeschef__notes(action:"read").`;
+Full notes: mcp__plugin_yeschef_yeschef__notes(action:"read").`;
 }
 function notesSummary(cwd2, maxChars = 1200) {
   const text = readNotes(cwd2);
@@ -298,7 +298,7 @@ ${disc.map((d) => `- ${d}`).join("\n")}` : ""
 }
 
 // src/hooks/user-prompt.ts
-var REMINDER = `[yeschef] Batch all independent discovery/read calls into ONE message. Reference earlier reads by file:line \u2014 never re-dump. Bulk exploration \u2192 scout subagent. Keep mcp__yeschef__notes current; check off finished plan items. Think \u226415 lines, then act.`;
+var REMINDER = `[yeschef] Batch all independent discovery/read calls into ONE message. Reference earlier reads by file:line \u2014 never re-dump. Bulk exploration \u2192 scout subagent. Keep mcp__plugin_yeschef_yeschef__notes current; check off finished plan items. Think \u226415 lines, then act.`;
 var input = readHookInput();
 var cwd = input.cwd ?? process.cwd();
 var sessionId = input.session_id ?? "unknown";

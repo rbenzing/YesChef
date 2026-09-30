@@ -171,7 +171,7 @@ export function maybeCompact(cwd: string, threshold: number): number {
 export function compactRecoveryContext(cwd: string): string | null {
   const summary = notesSummary(cwd);
   if (!summary) return null;
-  return `[yeschef] context was compacted. Your mise en place survives:\n${summary}\nFull notes: mcp__yeschef__notes(action:"read").`;
+  return `[yeschef] context was compacted. Your mise en place survives:\n${summary}\nFull notes: mcp__plugin_yeschef_yeschef__notes(action:"read").`;
 }
 
 /** Short summary for re-injection: goal + open plan items + last few discoveries. */

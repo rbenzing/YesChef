@@ -12,11 +12,11 @@ grows quadratically — thrift compounds.
 ## The 3-turn floor (Discover → Read → Act)
 
 **Turn 1 — Discover (one message, everything parallel):**
-- `mcp__yeschef__folder_desc` for orientation (hundreds of tokens, cached).
-- ONE `mcp__yeschef__batch_digest` call with ALL your globs/greps at once.
+- `mcp__plugin_yeschef_yeschef__folder_desc` for orientation (hundreds of tokens, cached).
+- ONE `mcp__plugin_yeschef_yeschef__batch_digest` call with ALL your globs/greps at once.
 - For anything bigger, delegate to the `scout` subagent instead of exploring
   yourself — its digest costs the chef ~40 lines, not 40 files.
-- Set the goal and plan in `mcp__yeschef__notes`:
+- Set the goal and plan in `mcp__plugin_yeschef_yeschef__notes`:
   - `action:"set", section:"goal"` — one sentence.
   - `action:"set", section:"plan"` — `- [ ]` checkboxes, smallest verifiable steps.
 
@@ -36,7 +36,7 @@ floor is the discipline: never spend a whole turn on ONE discovery call.
 1. **Never re-dump.** Earlier reads are referenced as `file:line`. Re-reading an
    unchanged file gets blocked by the kitchen guardrails.
 2. **Batch or delegate.** >2 expected reads → scout. Discovery → batch_digest.
-3. **Tests through `mcp__yeschef__run_tests`** — failures come back compacted,
+3. **Tests through `mcp__plugin_yeschef_yeschef__run_tests`** — failures come back compacted,
    green runs come back as one line.
 4. **Notes are memory, not transcript.** Durable facts go in notes (one line
    each); the transcript is allowed to be forgotten (compaction).

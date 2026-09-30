@@ -50,7 +50,7 @@ src/auth/login.ts:40-55. Don't touch token TTLs. Verify: npx vitest run src/auth
 
 1. Don't delegate what one narrow read answers (delegation has overhead too).
 2. Never spawn two cooks on overlapping files.
-3. Everything the brigade learns flows through `mcp__yeschef__notes` — it is the
+3. Everything the brigade learns flows through `mcp__plugin_yeschef_yeschef__notes` — it is the
    shared pass between stations; subagents read it on start, you read it after.
 4. A digest that violates its contract (raw dumps, >40 lines) gets summarized
    into one notes line and otherwise ignored — don't re-quote bloat into context.

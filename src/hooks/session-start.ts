@@ -5,11 +5,11 @@ import { getFolderDescription } from "../lib/folderdesc.js";
 import { notesSummary } from "../lib/notes.js";
 
 const HOUSE_RULES = `[yeschef] Kitchen open. House rules (token thrift + clean context):
-1. BATCH: fire all independent Glob/Grep/Read calls as parallel tool_use blocks in ONE message. Target: Discover → Read → Act in 3 turns. The mcp__yeschef__batch_digest tool runs many discovery ops in a single call.
+1. BATCH: fire all independent Glob/Grep/Read calls as parallel tool_use blocks in ONE message. Target: Discover → Read → Act in 3 turns. The mcp__plugin_yeschef_yeschef__batch_digest tool runs many discovery ops in a single call.
 2. DELEGATE: bulk exploration goes to the 'scout' subagent (cheap model, returns a ≤40-line digest with file:line pointers). Parallel implementation goes to 'line-cook'. Verification goes to 'expeditor'.
 3. NEVER RE-DUMP: reference earlier reads as file:line. Re-reading an unchanged file is blocked after repeated waste.
-4. NOTES: keep goal/plan/discoveries in mcp__yeschef__notes (the mise en place). Check off plan items as you finish them — the stop guard reads this.
-5. TESTS: run them via mcp__yeschef__run_tests (compacted output) instead of raw test commands when possible.
+4. NOTES: keep goal/plan/discoveries in mcp__plugin_yeschef_yeschef__notes (the mise en place). Check off plan items as you finish them — the stop guard reads this.
+5. TESTS: run them via mcp__plugin_yeschef_yeschef__run_tests (compacted output) instead of raw test commands when possible.
 6. OUTPUT: think ≤15 lines, then act with tools. Final replies stay concise.`;
 
 const input = readHookInput();

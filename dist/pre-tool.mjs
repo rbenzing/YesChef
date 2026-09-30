@@ -237,7 +237,7 @@ try {
       if (!fresh) {
         const count = rec.count + 1;
         state.reads[key] = { count, t: Date.now(), mtime };
-        const msg = `[yeschef] duplicate read #${count} of ${fp} \u2014 the file has NOT changed since you read it. Its content is already in context (or summarized in your notes). Reference it by file:line. If you genuinely need a fragment again, read a narrow range (offset/limit) or use mcp__yeschef__batch_digest.`;
+        const msg = `[yeschef] duplicate read #${count} of ${fp} \u2014 the file has NOT changed since you read it. Its content is already in context (or summarized in your notes). Reference it by file:line. If you genuinely need a fragment again, read a narrow range (offset/limit) or use mcp__plugin_yeschef_yeschef__batch_digest.`;
         if (count >= cfg.duplicateRead.blockOn && cfg.enforcement.duplicateReadGuard === "block") {
           state.blocked.dupReads += 1;
           saveState(cwd, sessionId, state);

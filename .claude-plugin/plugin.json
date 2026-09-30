@@ -1,6 +1,7 @@
 {
   "name": "yeschef",
-  "version": "0.3.0",
+  "displayName": "YesChef",
+  "version": "0.3.1",
   "description": "Kitchen-brigade AI harness: token thrift, clean context, autonomous service. BouzéCode methodology as a Claude Code plugin — batch discipline, result compaction, loop/paralysis guards, brigade subagents, mise-en-place notes.",
   "author": { "name": "Russell Benzing" },
   "homepage": "https://github.com/rbenzing/YesChef",

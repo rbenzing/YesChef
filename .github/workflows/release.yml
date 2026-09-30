@@ -37,12 +37,13 @@ jobs:
       - run: npm ci --no-audit --no-fund
       - run: npm run verify
 
-      - name: Plugin version must match package.json
+      - name: Plugin version must match package.json and package-lock.json
         run: |
           plugin="$(node -p "require('./.claude-plugin/plugin.json').version")"
           pkg="$(node -p "require('./package.json').version")"
-          if [ "$plugin" != "$pkg" ]; then
-            echo "::error::Version mismatch: .claude-plugin/plugin.json=$plugin vs package.json=$pkg" >&2
+          lock="$(node -p "require('./package-lock.json').version")"
+          if [ "$plugin" != "$pkg" ] || [ "$plugin" != "$lock" ]; then
+            echo "::error::Version mismatch: .claude-plugin/plugin.json=$plugin, package.json=$pkg, package-lock.json=$lock" >&2
             exit 1
           fi
           echo "version: $plugin"

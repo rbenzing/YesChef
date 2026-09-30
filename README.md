@@ -150,10 +150,11 @@ consequences:
 
 To cut a release:
 
-1. Bump `version` in **both** `.claude-plugin/plugin.json` and `package.json`
-   (CI enforces that they match).
+1. `npm version <version> --no-git-tag-version` (updates `package.json` and
+   `package-lock.json`), then set the same `version` in
+   `.claude-plugin/plugin.json` (CI enforces that all three match).
 2. `npm run verify` and commit, including any rebuilt `dist/`.
-3. Tag and push: `git tag v0.2.0 && git push origin main --tags`.
+3. Tag and push: `git tag v<version> && git push origin main --tags`.
 
 The tag must equal `v<plugin.json version>` or the release job fails.
 

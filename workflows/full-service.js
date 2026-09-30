@@ -30,7 +30,7 @@ async function brigade(type, prompt, opts) {
 phase('Discover')
 const digest = await brigade('yeschef:scout',
   `Task: ${task}\n\nScout the codebase for everything needed to implement this task. ` +
-  `Use mcp__yeschef__folder_desc first, then ONE mcp__yeschef__batch_digest batch. ` +
+  `Use mcp__plugin_yeschef_yeschef__folder_desc first, then ONE mcp__plugin_yeschef_yeschef__batch_digest batch. ` +
   `Return your digest per contract: ANSWER / POINTERS (file:line) / CAVEATS, ≤40 lines.`,
   { label: 'scout', phase: 'Discover', model: 'haiku' })
 

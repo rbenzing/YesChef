@@ -249,7 +249,7 @@ ${open.slice(0, 5).map((i) => `- [ ] ${i}`).join("\n")}${open.length > 5 ? `
     if (cfg.telemetry.enabled) logEvent(cwd, sessionId, "stop-blocked", { openItems: open.length, testsFailing: tests?.failing ?? false });
     const msg = `[yeschef] Service isn't finished:
 ${reasons.join("\n")}
-Keep cooking: complete the next open item, or \u2014 if an item is genuinely done or obsolete \u2014 check it off / remove it via mcp__yeschef__notes and explain. If you are truly blocked, say exactly what's blocking you.`;
+Keep cooking: complete the next open item, or \u2014 if an item is genuinely done or obsolete \u2014 check it off / remove it via mcp__plugin_yeschef_yeschef__notes and explain. If you are truly blocked, say exactly what's blocking you.`;
     if (cfg.enforcement.stopGuard === "block") emit({ decision: "block", reason: msg });
     emit({ hookSpecificOutput: { hookEventName: "Stop", additionalContext: msg } });
   }

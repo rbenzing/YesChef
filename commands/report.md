@@ -1,5 +1,6 @@
 ---
 description: Kitchen report — what YesChef saved and blocked this session and recently
+allowed-tools: Bash(node:*)
 ---
 
 Produce the kitchen report.

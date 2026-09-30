@@ -1,5 +1,6 @@
 ---
 description: Research service — fan out angles, cross-check claims, return one cited report (token-thrifty deep research)
+argument-hint: <question>
 ---
 
 Run research service on: **$ARGUMENTS**
@@ -11,7 +12,7 @@ Preferred path — the scripted workflow (sources and sweeps never touch your co
    `args: { "question": "$ARGUMENTS" }`.
 2. When it completes, relay the report: answer first, claims with citations,
    refuted/unresolved items called out honestly.
-3. Append the 3-5 most durable findings to `mcp__yeschef__notes` (discoveries),
+3. Append the 3-5 most durable findings to `mcp__plugin_yeschef_yeschef__notes` (discoveries),
    one line each with source.
 
 Fallback — if the Workflow tool is unavailable, run the same shape with

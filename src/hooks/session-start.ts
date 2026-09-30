@@ -10,7 +10,7 @@ const HOUSE_RULES = `[yeschef] Kitchen open. House rules (token thrift + clean c
 3. NEVER RE-DUMP: reference earlier reads as file:line. Re-reading an unchanged file is blocked after repeated waste.
 4. NOTES: keep goal/plan/discoveries in mcp__plugin_yeschef_yeschef__notes (the mise en place). Check off plan items as you finish them — the stop guard reads this.
 5. TESTS: run them via mcp__plugin_yeschef_yeschef__run_tests (compacted output) instead of raw test commands when possible.
-6. OUTPUT: think ≤15 lines, then act with tools. Final replies stay concise.`;
+6. OUTPUT: when you have enough information to act, act. Final replies stay concise.`;
 
 const input = readHookInput();
 const cwd = input.cwd ?? process.cwd();

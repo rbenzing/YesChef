@@ -9,7 +9,7 @@ Prep the kitchen for service:
 2. Call `mcp__plugin_yeschef_yeschef__notes` with action "read". If the goal is unset and the user
    gave a task in $ARGUMENTS, set the goal (one sentence) and draft a plan as
    `- [ ]` checkboxes via `notes`.
-3. Confirm readiness in ≤8 lines: repo shape (2-3 lines from the index), the goal,
+3. Confirm readiness briefly: repo shape (from the index), the goal,
    the open plan items, and which brigade members you expect to use (scout /
    line-cook / expeditor) for this work.
 

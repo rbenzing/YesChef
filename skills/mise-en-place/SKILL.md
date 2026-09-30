@@ -40,8 +40,8 @@ floor is the discipline: never spend a whole turn on ONE discovery call.
    green runs come back as one line.
 4. **Notes are memory, not transcript.** Durable facts go in notes (one line
    each); the transcript is allowed to be forgotten (compaction).
-5. **Think ≤15 lines, then act.** Long deliberation is output tokens at the
-   most expensive rate. Decide, fire tools, adjust.
+5. **Act once you know enough.** When you have enough information to act, act;
+   don't re-derive facts already established. Decide, fire tools, adjust.
 6. **Plan items are the contract.** The stop guard blocks finishing with open
    `- [ ]` items — keep the plan honest: check off what's done, delete what's
    obsolete (with a one-line decision note).

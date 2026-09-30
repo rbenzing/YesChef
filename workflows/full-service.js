@@ -82,7 +82,7 @@ for (const t of plan.tickets) {
 const cookTicket = (t, i) =>
   brigade('yeschef:line-cook',
     `Ticket: ${t.title}\n\n${t.instructions}\n\nFiles you may touch: ${t.files.join(', ')}. ` +
-    `Report per contract: DONE/BLOCKED, CHANGES (file:line), TESTS, NOTES. ≤30 lines.`,
+    `Report per contract: DONE/BLOCKED, CHANGES (file:line), TESTS, NOTES.`,
     { label: `cook:${i + 1}-${t.title.slice(0, 24)}`, phase: 'Cook' })
 let cooked
 if (overlap) {
@@ -99,8 +99,8 @@ phase('Verify')
 const verdict = await brigade('yeschef:expeditor',
   `Goal: ${task}\n\nCook reports:\n${reports.join('\n---\n')}\n\n` +
   `Verify the merged change set. Whole-set verify command suggested by the plan: ${plan.verifyCommand || '(discover one)'}. ` +
-  `Report per contract: VERDICT / EVIDENCE / FINDINGS / UNCHECKED. ≤30 lines.`,
-  { label: 'expeditor', phase: 'Verify' })
+  `Report per contract: VERDICT / EVIDENCE / FINDINGS / UNCHECKED.`,
+  { label: 'expeditor', phase: 'Verify', model: 'sonnet' })
 
 return {
   task,

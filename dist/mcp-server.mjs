@@ -21139,7 +21139,8 @@ var DEFAULTS = {
   duplicateRead: { ttlMinutes: 10, warnOn: 2, blockOn: 3 },
   stop: { maxConsecutiveBlocks: 2 },
   telemetry: { enabled: true },
-  // Rates verified against platform.claude.com/docs/en/about-claude/pricing (2026-09-18).
+  // Rates verified against platform.claude.com/docs/en/about-claude/pricing (2026-09-18);
+  // Opus 5.5 / bare-alias rates against the claude-api skill model table (cached 2026-09-25).
   // Keys match as substrings of the model id, LONGEST key first. A bare family key is
   // the current generation's rate, because Claude Code also writes bare aliases
   // ("sonnet", "opus") into the transcript; older generations that are priced
@@ -21154,20 +21155,40 @@ var DEFAULTS = {
       "sonnet-4": [3, 15],
       // Sonnet 4.6 / 4.5 / 4
       sonnet: [2, 10],
-      // Sonnet 5
+      // Sonnet 5.5 / 5
       fable: [10, 50],
       mythos: [10, 50],
+      // 5.1 / 5
       "opus-4-1": [15, 75],
       // retired (Bedrock/Google Cloud only)
       "opus-4-2025": [15, 75],
       // Opus 4, dated id, retired (Google Cloud only)
-      opus: [5, 25]
-      // Opus 5 / 4.8 / 4.7 / 4.6 / 4.5
+      "opus-4": [5, 25],
+      // Opus 4.8 / 4.7 / 4.6 / 4.5
+      "opus-5": [5, 25],
+      // Opus 5
+      "opus-5-5": [4, 20],
+      // Opus 5.5
+      opus: [4, 20]
+      // bare alias → Opus 5.5
     },
     default: [5, 25],
     // unknown model → Opus-tier
     cacheReadMult: 0.1,
-    cacheReadMultByModel: { "fable-5-1": 0.025, "mythos-5-1": 0.025 },
+    // Exceptions to the 0.1× cache-hit rate. The bare aliases resolve to the current
+    // generation, so they carry its rate while older generations fall back to 0.1×.
+    cacheReadMultByModel: {
+      "fable-5-1": 0.025,
+      "mythos-5-1": 0.025,
+      fable: 0.025,
+      mythos: 0.025,
+      "fable-5": 0.1,
+      "mythos-5": 0.1,
+      "opus-5-5": 0.05,
+      opus: 0.05,
+      "opus-5": 0.1,
+      "opus-4": 0.1
+    },
     cacheWriteMult: 1.25,
     cacheWrite1hMult: 2
   }
@@ -21713,14 +21734,14 @@ ${tail}` : "");
 // src/mcp/server.ts
 var cwd = process.env.CLAUDE_PROJECT_DIR || process.cwd();
 var cfg = loadConfig(cwd);
-var VERSION = true ? "0.3.1" : "0.0.0-dev";
+var VERSION = true ? "0.4.0" : "0.0.0-dev";
 var server = new McpServer({ name: "yeschef", version: VERSION });
 function text(s) {
   return { content: [{ type: "text", text: s }] };
 }
 server.tool(
   "folder_desc",
-  "Annotated description of the repo (or a subpath) in a few hundred tokens: per-directory file counts, dominant languages, key files, package/readme one-liners. ALWAYS prefer this over exploratory Glob/LS sprees.",
+  "Annotated description of the repo (or a subpath) in a few hundred tokens: per-directory file counts, dominant languages, key files, package/readme one-liners. Use it to orient before exploring with Glob/LS. It returns no file contents or symbols. Results are cached for up to 10 minutes (reset when the top-level directory changes); pass refresh:true after adding or moving files deeper in the tree. A path outside the project root returns an error.",
   {
     path: external_exports.string().optional().describe("Subpath relative to the project root (default: root)"),
     depth: external_exports.number().int().min(1).max(6).optional().describe("Tree depth (default 3)"),
@@ -21746,8 +21767,8 @@ var opSchema = external_exports.object({
 }).describe("One op: {glob} | {grep, glob?, ignoreCase?, limit?} | {read, start?, end?}");
 server.tool(
   "batch_digest",
-  "Run MANY discovery ops (glob / grep / read line-ranges) in ONE call and get a single merged, size-capped digest. Use this for your whole Discover phase instead of separate tool calls. Max 20 ops.",
-  { ops: external_exports.array(opSchema).min(1).max(20).describe("Ops to run in parallel") },
+  "Run up to 20 discovery ops (glob / grep / read line-range) in one call and get one merged digest, in op order; one call replaces a round of separate Glob/Grep/Read calls. Paths are project-root-relative with forward slashes, and a glob must match the whole path: '*.ts' matches root files only, '**/*.ts' matches all. grep takes a JavaScript regex, case-insensitive unless ignoreCase:false, and shows at most 5 hits per file and 30 in total (limit). glob lists 40 paths by default (limit). read returns lines start..end (default: 80 lines from start), each cut at 200 chars. Dot-directories, ignored dirs, binary files and files over 1.5 MB are skipped. The digest is capped at 9000 chars; if it is cut, narrow the ops.",
+  { ops: external_exports.array(opSchema).min(1).max(20).describe("Ops to run, in order; results are merged into one digest") },
   async ({ ops }) => {
     const mapped = ops.map(
       (o) => o.glob !== void 0 && o.grep === void 0 && o.read === void 0 ? { glob: o.glob, limit: o.limit } : o.grep !== void 0 ? { grep: o.grep, glob: o.glob, ignoreCase: o.ignoreCase, limit: o.limit } : { read: o.read ?? "", start: o.start, end: o.end }
@@ -21758,7 +21779,7 @@ server.tool(
 );
 server.tool(
   "notes",
-  "The shared mise-en-place scratchpad (goal / plan / discoveries / decisions). Keep it current: set the goal once, keep the plan as '- [ ]' checkboxes, append discoveries as you learn, check items off as you finish. The stop guard reads open plan items; all brigade subagents share these notes.",
+  "The project's shared mise-en-place notes (sections goal / plan / discoveries / decisions). They persist across sessions and every brigade subagent reads them. read returns the whole file; set replaces one section; append adds lines to it; check marks the first open '- [ ]' plan item containing the given text (case-insensitive) as '- [x]'. The stop guard blocks finishing while '- [ ]' items remain in plan. Above a size threshold the notes are compacted: duplicate lines dropped, checked items replaced by a count, older discoveries archived.",
   {
     action: external_exports.enum(["read", "set", "append", "check"]).describe("read all | set a section | append to a section | check off a plan item"),
     section: external_exports.enum(SECTIONS).optional().describe("Required for set/append"),
@@ -21779,7 +21800,7 @@ server.tool(
 );
 server.tool(
   "run_tests",
-  "Run a test command and return COMPACTED output: failures + summary when red, a one-liner when green; full output saved to disk with a pointer. Prefer this over raw Bash for tests.",
+  "Run a test command in the project root and return compacted output: first line 'exit N', then failures + summary when red or a one-liner when green; the full output is saved to disk with a pointer. Each run records pass/fail, and the stop guard blocks finishing after a recent failing run. Default timeout 300s (max 900). Prefer this over raw Bash for tests.",
   {
     command: external_exports.string().describe("Full test command, e.g. 'npx vitest run' or 'python -m pytest -q'"),
     timeoutSeconds: external_exports.number().int().min(5).max(900).optional().describe("Default 300")

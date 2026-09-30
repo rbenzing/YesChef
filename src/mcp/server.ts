@@ -33,7 +33,7 @@ function text(s: string) {
 
 server.tool(
   "folder_desc",
-  "Annotated description of the repo (or a subpath) in a few hundred tokens: per-directory file counts, dominant languages, key files, package/readme one-liners. ALWAYS prefer this over exploratory Glob/LS sprees.",
+  "Annotated description of the repo (or a subpath) in a few hundred tokens: per-directory file counts, dominant languages, key files, package/readme one-liners. Use it to orient before exploring with Glob/LS. It returns no file contents or symbols. Results are cached for up to 10 minutes (reset when the top-level directory changes); pass refresh:true after adding or moving files deeper in the tree. A path outside the project root returns an error.",
   {
     path: z.string().optional().describe("Subpath relative to the project root (default: root)"),
     depth: z.number().int().min(1).max(6).optional().describe("Tree depth (default 3)"),
@@ -64,8 +64,8 @@ const opSchema = z.object({
 
 server.tool(
   "batch_digest",
-  "Run MANY discovery ops (glob / grep / read line-ranges) in ONE call and get a single merged, size-capped digest. Use this for your whole Discover phase instead of separate tool calls. Max 20 ops.",
-  { ops: z.array(opSchema).min(1).max(20).describe("Ops to run in parallel") },
+  "Run up to 20 discovery ops (glob / grep / read line-range) in one call and get one merged digest, in op order; one call replaces a round of separate Glob/Grep/Read calls. Paths are project-root-relative with forward slashes, and a glob must match the whole path: '*.ts' matches root files only, '**/*.ts' matches all. grep takes a JavaScript regex, case-insensitive unless ignoreCase:false, and shows at most 5 hits per file and 30 in total (limit). glob lists 40 paths by default (limit). read returns lines start..end (default: 80 lines from start), each cut at 200 chars. Dot-directories, ignored dirs, binary files and files over 1.5 MB are skipped. The digest is capped at 9000 chars; if it is cut, narrow the ops.",
+  { ops: z.array(opSchema).min(1).max(20).describe("Ops to run, in order; results are merged into one digest") },
   async ({ ops }) => {
     const mapped = ops.map((o): DigestOp =>
       o.glob !== undefined && o.grep === undefined && o.read === undefined ? { glob: o.glob, limit: o.limit }
@@ -79,7 +79,7 @@ server.tool(
 
 server.tool(
   "notes",
-  "The shared mise-en-place scratchpad (goal / plan / discoveries / decisions). Keep it current: set the goal once, keep the plan as '- [ ]' checkboxes, append discoveries as you learn, check items off as you finish. The stop guard reads open plan items; all brigade subagents share these notes.",
+  "The project's shared mise-en-place notes (sections goal / plan / discoveries / decisions). They persist across sessions and every brigade subagent reads them. read returns the whole file; set replaces one section; append adds lines to it; check marks the first open '- [ ]' plan item containing the given text (case-insensitive) as '- [x]'. The stop guard blocks finishing while '- [ ]' items remain in plan. Above a size threshold the notes are compacted: duplicate lines dropped, checked items replaced by a count, older discoveries archived.",
   {
     action: z.enum(["read", "set", "append", "check"]).describe("read all | set a section | append to a section | check off a plan item"),
     section: z.enum(SECTIONS).optional().describe("Required for set/append"),
@@ -104,7 +104,7 @@ server.tool(
 
 server.tool(
   "run_tests",
-  "Run a test command and return COMPACTED output: failures + summary when red, a one-liner when green; full output saved to disk with a pointer. Prefer this over raw Bash for tests.",
+  "Run a test command in the project root and return compacted output: first line 'exit N', then failures + summary when red or a one-liner when green; the full output is saved to disk with a pointer. Each run records pass/fail, and the stop guard blocks finishing after a recent failing run. Default timeout 300s (max 900). Prefer this over raw Bash for tests.",
   {
     command: z.string().describe("Full test command, e.g. 'npx vitest run' or 'python -m pytest -q'"),
     timeoutSeconds: z.number().int().min(5).max(900).optional().describe("Default 300"),

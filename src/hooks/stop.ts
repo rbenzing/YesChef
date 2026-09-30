@@ -47,7 +47,8 @@ try {
     const msg =
       `[yeschef] Service isn't finished:\n${reasons.join("\n")}\n` +
       `Keep cooking: complete the next open item, or — if an item is genuinely done or obsolete — check it off / remove it via mcp__plugin_yeschef_yeschef__notes and explain. ` +
-      `If you are truly blocked, say exactly what's blocking you.`;
+      `If you are blocked, say exactly what's blocking you. These notes persist across sessions: if the user's latest request was a question ` +
+      `or unrelated to this plan, answer it and stop, noting in one line that the plan items remain open.`;
     if (cfg.enforcement.stopGuard === "block") emit({ decision: "block", reason: msg });
     emit({ hookSpecificOutput: { hookEventName: "Stop", additionalContext: msg } }); // warn mode
   }

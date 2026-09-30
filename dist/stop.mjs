@@ -51,7 +51,8 @@ var DEFAULTS = {
   duplicateRead: { ttlMinutes: 10, warnOn: 2, blockOn: 3 },
   stop: { maxConsecutiveBlocks: 2 },
   telemetry: { enabled: true },
-  // Rates verified against platform.claude.com/docs/en/about-claude/pricing (2026-09-18).
+  // Rates verified against platform.claude.com/docs/en/about-claude/pricing (2026-09-18);
+  // Opus 5.5 / bare-alias rates against the claude-api skill model table (cached 2026-09-25).
   // Keys match as substrings of the model id, LONGEST key first. A bare family key is
   // the current generation's rate, because Claude Code also writes bare aliases
   // ("sonnet", "opus") into the transcript; older generations that are priced
@@ -66,20 +67,40 @@ var DEFAULTS = {
       "sonnet-4": [3, 15],
       // Sonnet 4.6 / 4.5 / 4
       sonnet: [2, 10],
-      // Sonnet 5
+      // Sonnet 5.5 / 5
       fable: [10, 50],
       mythos: [10, 50],
+      // 5.1 / 5
       "opus-4-1": [15, 75],
       // retired (Bedrock/Google Cloud only)
       "opus-4-2025": [15, 75],
       // Opus 4, dated id, retired (Google Cloud only)
-      opus: [5, 25]
-      // Opus 5 / 4.8 / 4.7 / 4.6 / 4.5
+      "opus-4": [5, 25],
+      // Opus 4.8 / 4.7 / 4.6 / 4.5
+      "opus-5": [5, 25],
+      // Opus 5
+      "opus-5-5": [4, 20],
+      // Opus 5.5
+      opus: [4, 20]
+      // bare alias → Opus 5.5
     },
     default: [5, 25],
     // unknown model → Opus-tier
     cacheReadMult: 0.1,
-    cacheReadMultByModel: { "fable-5-1": 0.025, "mythos-5-1": 0.025 },
+    // Exceptions to the 0.1× cache-hit rate. The bare aliases resolve to the current
+    // generation, so they carry its rate while older generations fall back to 0.1×.
+    cacheReadMultByModel: {
+      "fable-5-1": 0.025,
+      "mythos-5-1": 0.025,
+      fable: 0.025,
+      mythos: 0.025,
+      "fable-5": 0.1,
+      "mythos-5": 0.1,
+      "opus-5-5": 0.05,
+      opus: 0.05,
+      "opus-5": 0.1,
+      "opus-4": 0.1
+    },
     cacheWriteMult: 1.25,
     cacheWrite1hMult: 2
   }
@@ -249,7 +270,7 @@ ${open.slice(0, 5).map((i) => `- [ ] ${i}`).join("\n")}${open.length > 5 ? `
     if (cfg.telemetry.enabled) logEvent(cwd, sessionId, "stop-blocked", { openItems: open.length, testsFailing: tests?.failing ?? false });
     const msg = `[yeschef] Service isn't finished:
 ${reasons.join("\n")}
-Keep cooking: complete the next open item, or \u2014 if an item is genuinely done or obsolete \u2014 check it off / remove it via mcp__plugin_yeschef_yeschef__notes and explain. If you are truly blocked, say exactly what's blocking you.`;
+Keep cooking: complete the next open item, or \u2014 if an item is genuinely done or obsolete \u2014 check it off / remove it via mcp__plugin_yeschef_yeschef__notes and explain. If you are blocked, say exactly what's blocking you. These notes persist across sessions: if the user's latest request was a question or unrelated to this plan, answer it and stop, noting in one line that the plan items remain open.`;
     if (cfg.enforcement.stopGuard === "block") emit({ decision: "block", reason: msg });
     emit({ hookSpecificOutput: { hookEventName: "Stop", additionalContext: msg } });
   }

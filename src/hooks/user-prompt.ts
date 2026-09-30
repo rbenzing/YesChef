@@ -4,8 +4,7 @@ import { readHookInput, emit, emitNothing, loadConfig, loadState, saveState, rea
 import { compactRecoveryContext } from "../lib/notes.js";
 
 const REMINDER =
-  `[yeschef] Batch all independent discovery/read calls into ONE message. Reference earlier reads by file:line — never re-dump. ` +
-  `Bulk exploration → scout subagent. Keep mcp__plugin_yeschef_yeschef__notes current; check off finished plan items. Think ≤15 lines, then act.`;
+  `[yeschef] First privately list what you need next; then request every item that doesn't depend on another's result in this one response.`;
 
 const input = readHookInput();
 const cwd = input.cwd ?? process.cwd();

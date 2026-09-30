@@ -14,9 +14,9 @@ scratch and burns more than it saves. The difference is the ticket.
 | Brigade member | Send them | They return |
 |---|---|---|
 | `scout` (cheap model) | any exploration needing >2 reads: "where is X", "map Y", "trace Z" | ≤40-line digest, file:line pointers |
-| `line-cook` | one well-specified change with pointers attached | ≤30-line DONE/BLOCKED + changes + test result |
-| `expeditor` | "verify the change set against the goal" — always, before declaring done | ≤30-line PASS/FAIL verdict with evidence |
-| `researcher` | one ANGLE of an external question (docs, APIs, prior art, comparisons) | ≤40-line digest: claims + source URLs + confidence tags |
+| `line-cook` | one well-specified change with pointers attached | compact DONE/BLOCKED + changes + test result |
+| `expeditor` | "verify the change set against the goal" — always, before declaring done | PASS/FAIL verdict with evidence |
+| `researcher` | one ANGLE of an external question (docs, APIs, prior art, comparisons) | compact digest: claims + source URLs + confidence tags |
 
 ## Writing a ticket (the briefing IS the savings)
 
@@ -52,5 +52,5 @@ src/auth/login.ts:40-55. Don't touch token TTLs. Verify: npx vitest run src/auth
 2. Never spawn two cooks on overlapping files.
 3. Everything the brigade learns flows through `mcp__plugin_yeschef_yeschef__notes` — it is the
    shared pass between stations; subagents read it on start, you read it after.
-4. A digest that violates its contract (raw dumps, >40 lines) gets summarized
-   into one notes line and otherwise ignored — don't re-quote bloat into context.
+4. When a digest comes back bloated (raw dumps), record its useful findings as
+   notes lines and reference those — don't re-quote the bloat into context.

@@ -18,7 +18,7 @@ async function brigade(type, prompt, opts) {
     return await agent(prompt, Object.assign({}, o, { agentType: type }))
   } catch (e) {
     return await agent(
-      `You are acting as the YesChef ${type}. Contract: ≤40-line digest, claims with source URLs and confidence tags, no page dumps.\n\n` + prompt,
+      `You are acting as the YesChef ${type}. Contract: compact digest, claims with source URLs and confidence tags, no page dumps.\n\n` + prompt,
       o
     )
   }
@@ -65,7 +65,7 @@ const CLAIMS = {
 }
 const sweeps = await parallel(planned.angles.map((a, i) => () =>
   brigade('yeschef:researcher',
-    `Question: ${question}\nYour angle: ${a.name} — ${a.brief}\nResearch this angle per your contract and return structured claims.`,
+    `Question: ${question}\nYour angle: ${a.name} — ${a.brief}\nResearch this angle per your method. Return the structured output schema; it replaces the text digest format in your contract.`,
     { label: `research:${a.name.slice(0, 24)}`, phase: 'Sweep', schema: CLAIMS })
 ))
 

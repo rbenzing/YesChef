@@ -25,7 +25,7 @@ Agentic context grows quadratically: every turn resends the whole history, so a 
 
 1. **Fewer turns** — batch discipline, folder indexing, one-call batch discovery
 2. **Less context** — results compacted *before* they land; bulk work isolated in subagents
-3. **Less output** — "think ≤15 lines, then act"
+3. **Less output** — act once you know enough; compact digests from every subagent
 4. **No wasted motion** — loop detection, duplicate-read blocking, paralysis abort, don't-stop-early guard
 
 ---
@@ -111,14 +111,11 @@ Optional statusline (context %, cost, tokens trimmed, waste blocked): add to `~/
   "budget": { "usd": 5.00, "warnAt": 0.75, "wrapUpAt": 0.9 },
   "reminder": { "enabled": true },
   "telemetry": { "enabled": true },
-  "pricing": {
-    "models": { "haiku": [1, 5], "sonnet": [3, 15], "fable": [10, 50], "opus": [5, 25] },
-    "default": [5, 25],
-    "cacheReadMult": 0.1,
-    "cacheWriteMult": 1.25
-  }
+  "pricing": { "models": { "opus-5-5": [4, 20] } }
 }
 ```
+
+`pricing` overrides are merged key by key over the built-in table (`[input, output]` $/MTok, matched as a substring of the model id, longest key first). The defaults, including per-model cache-read rates, live in `DEFAULTS.pricing` in [src/lib/core.ts](src/lib/core.ts); only list the models you need to change.
 
 Session state and telemetry live under `~/.claude/yeschef/` — nothing is written into your repos. `/yeschef:report` aggregates the log; figures are estimates, not billing data.
 

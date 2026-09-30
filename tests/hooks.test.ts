@@ -357,4 +357,13 @@ describe("statusline", () => {
     expect(out).toContain("yeschef");
     expect(out).toContain("$1.23");
   });
+  it("shows the session effort level next to the model when present", () => {
+    const run = (input: object) => execFileSync(process.execPath, [join(DIST, "statusline.mjs")], {
+      input: JSON.stringify({ workspace: { current_dir: cwd }, ...input }),
+      env: { ...process.env, YESCHEF_HOME: home },
+      encoding: "utf8",
+    });
+    expect(run({ model: { id: "claude-opus-5-5" }, effort: { level: "xhigh" } })).toContain("opus-5-5 xhigh");
+    expect(run({ model: { id: "claude-opus-5-5" } })).not.toMatch(/opus-5-5 \w/);
+  });
 });

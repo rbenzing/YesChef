@@ -37,6 +37,7 @@ try { input = JSON.parse(readFileSync(0, "utf8")); } catch { /* render from stat
 
 const cwd = pick(input, ["workspace.current_dir", "cwd", "workspace.project_dir"]) ?? process.cwd();
 const model = pick(input, ["model.display_name", "model.id", "model"]) ?? "";
+const effort = pick(input, ["effort.level"]);
 const cost = pick(input, ["cost.total_cost_usd", "total_cost_usd"]);
 const ctxPct = pick(input, [
   "context.used_percent", "context.filled_percent", "context_window.used_percent", "context_usage_percent",
@@ -45,7 +46,10 @@ const ctxPct = pick(input, [
 const s = latestState(String(cwd), pick(input, ["session_id"]) ?? undefined);
 
 const parts: string[] = ["👨‍🍳 yeschef"];
-if (model) parts.push(String(model).toLowerCase().replace(/^claude[- ]?/, ""));
+if (model) {
+  const name = String(model).toLowerCase().replace(/^claude[- ]?/, "");
+  parts.push(typeof effort === "string" ? `${name} ${effort}` : name);
+}
 if (typeof ctxPct === "number") parts.push(`ctx ${Math.round(ctxPct)}%`);
 if (typeof cost === "number") parts.push(`$${cost.toFixed(2)}`);
 if (s) {

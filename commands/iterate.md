@@ -23,9 +23,9 @@ wasted motion, and the budget guard (if configured) bounds spend.
    d. Check it off: `notes` action "check". Append discoveries worth keeping.
    e. Every 3-4 items, or before any risky change: run `expeditor` on the
       accumulated change set; fix regressions BEFORE taking new items.
-3. **Finish.** When the plan is empty: final `expeditor` pass, then report in
-   ≤15 lines — items completed, evidence, discoveries, anything deferred (as
-   new `- [ ]` items with a one-line reason).
+3. **Finish.** When the plan is empty: final `expeditor` pass, then report for a
+   reader who didn't watch the run — outcome first, then items completed, evidence,
+   discoveries, anything deferred (as new `- [ ]` items with a one-line reason).
 
 Rules: one item at a time; never widen an item's scope mid-cycle (append a new
 plan item instead); if blocked on an item after a genuine attempt, mark it

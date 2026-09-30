@@ -20,7 +20,7 @@ subagents, skills, commands, workflows, statusline**.
 |---|---|---|---|
 | 1 | **Fewer turns** | DAG executor, `depends_on`, 3-turn floor (Discover→Read→Act), `GetFolderDescription` | `mise-en-place` skill (batch discipline, 3-turn floor); `folder_desc` + `batch_digest` MCP tools (one call = a whole Discover turn); per-turn chef's reminder via `UserPromptSubmit` |
 | 2 | **Less context** | ContextGC tool (trash/keep_snippets/notes), 50-line snippet wrapping, methodology note + 20k structural compaction, tool-result truncation, pytest compaction | **Prevention over cleanup**: brigade subagents absorb bulk reads and return digests; `PostToolUse → updatedToolOutput` compacts test output and truncates oversized Bash spew (overflow → file + pointer); `notes` MCP tool = shared mise-en-place scratchpad with structural compaction; duplicate-read guardrail |
-| 3 | **Less output** | "Think ≤15 lines then ACT" injection, thinking overflow cap | Same instruction carried by the per-turn reminder + skills; digest contracts cap subagent final outputs |
+| 3 | **Less output** | "Think ≤15 lines then ACT" injection, thinking overflow cap | "Act once you know enough" house rule + skill; compact digest contracts for subagent final outputs. Thinking depth itself is the session's effort setting (thinking is always on for Opus 5.5 / Fable 5.1) |
 | 4 | **Cache prices** | Fixed block order with `cache_control` breakpoints | Claude Code owns caching natively. YesChef only avoids *breaking* it: stable injection text, append-only placement, no system-prompt churn mid-session |
 
 **Safety stoppers** (BouzéCode's "last resort" layer) map directly:
@@ -86,7 +86,7 @@ spend down; both at once is the point.
   reports). Plugin agents can't carry `hooks`/`mcpServers`/`permissionMode`
   (ignored by design); they inherit the session's MCP tools, which is all we need.
 - **skills/** — `mise-en-place` (the methodology: batch discipline, 3-turn floor,
-  notes contract, think-≤15-lines), `brigade` (delegation playbook + digest
+  notes contract, act-once-you-know-enough), `brigade` (delegation playbook + digest
   contracts).
 - **commands/** — `/yeschef:prep` (index + open notes), `/yeschef:cook` (run the
   full-service workflow), `/yeschef:report` (savings/telemetry report),
@@ -136,8 +136,9 @@ These are honest, structural limits of the plugin surface vs. owning the loop:
    tool. BouzéCode's data says seeding alone took omission 81.8%→0%; we get the
    same class of fix, without the hard guarantee.
 4. **No thinking-stream control.** Can't cap or summarize thinking overflow.
-   *Instead:* instruction-level "think ≤15 lines then act"; effort/thinking level
-   stays the user's choice.
+   *Instead:* effort/thinking level stays the user's choice. The earlier
+   "think ≤15 lines" instruction was dropped (2026-09-30 prompt audit): on
+   models where thinking is always on, effort is the only real control.
 5. **No true DAG `depends_on` in the main thread.** Parallel tool calls exist,
    but no cross-batch dependency scheduling. *Instead:* `batch_digest` collapses
    a whole Discover stage into one call; workflows give real scripted DAGs for

@@ -55,6 +55,7 @@ try {
 }
 var cwd = pick(input, ["workspace.current_dir", "cwd", "workspace.project_dir"]) ?? process.cwd();
 var model = pick(input, ["model.display_name", "model.id", "model"]) ?? "";
+var effort = pick(input, ["effort.level"]);
 var cost = pick(input, ["cost.total_cost_usd", "total_cost_usd"]);
 var ctxPct = pick(input, [
   "context.used_percent",
@@ -64,7 +65,10 @@ var ctxPct = pick(input, [
 ]);
 var s = latestState(String(cwd), pick(input, ["session_id"]) ?? void 0);
 var parts = ["\u{1F468}\u200D\u{1F373} yeschef"];
-if (model) parts.push(String(model).toLowerCase().replace(/^claude[- ]?/, ""));
+if (model) {
+  const name = String(model).toLowerCase().replace(/^claude[- ]?/, "");
+  parts.push(typeof effort === "string" ? `${name} ${effort}` : name);
+}
 if (typeof ctxPct === "number") parts.push(`ctx ${Math.round(ctxPct)}%`);
 if (typeof cost === "number") parts.push(`$${cost.toFixed(2)}`);
 if (s) {

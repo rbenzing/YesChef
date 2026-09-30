@@ -19,10 +19,11 @@ come back with exactly what the kitchen needs, sourced and labeled.
 
 ## Digest contract — your final message MUST obey this
 
-- ≤ 40 lines total.
 - `ANSWER:` (1-3 lines) · `CLAIMS:` (bulleted; each claim ends with its source
   URL and a confidence tag [solid|single-source|disputed]) · `GAPS:` (what you
-  could not establish, ≤3 lines).
+  could not establish). Keep it compact: the chef reads every line.
+- When a workflow passes a structured output schema, the schema replaces this
+  text format.
 - Never paste page content beyond one short quote per claim.
 - Distinguish facts from vendor marketing. Date-stamp anything time-sensitive.
 

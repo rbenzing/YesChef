@@ -311,10 +311,13 @@ describe("cost estimation (cache-aware, by model tier)", () => {
     expect(cost("claude-sonnet-4-6", { inTok: 1e6, out: 1e6 })).toBeCloseTo(18); // 3 + 15
     expect(cost("claude-sonnet-4-5", { inTok: 1e6, out: 1e6 })).toBeCloseTo(18); // 3 + 15
     expect(cost("sonnet", { inTok: 1e6, out: 1e6 })).toBeCloseTo(12);            // bare alias → current gen
-    expect(cost("opus", { inTok: 1e6, out: 1e6 })).toBeCloseTo(30);              // bare alias → current gen
+    expect(cost("opus", { inTok: 1e6, out: 1e6 })).toBeCloseTo(24);              // bare alias → Opus 5.5
     expect(cost("haiku", { inTok: 1e6, out: 1e6 })).toBeCloseTo(6);              // bare alias → current gen
     expect(cost("claude-opus-4-1", { inTok: 1e6, out: 1e6 })).toBeCloseTo(90);   // 15 + 75
     expect(cost("claude-opus-5", { inTok: 1e6, out: 1e6 })).toBeCloseTo(30);     // 5 + 25
+    expect(cost("claude-opus-5-5", { inTok: 1e6, out: 1e6 })).toBeCloseTo(24);   // 4 + 20
+    expect(cost("claude-opus-4-20250514", { inTok: 1e6, out: 1e6 })).toBeCloseTo(90); // Opus 4 dated id
+    expect(cost("claude-opus-4-5-20251101", { inTok: 1e6, out: 1e6 })).toBeCloseTo(30); // Opus 4.5 dated id
   });
   it("discounts cache reads (0.1×) and surcharges cache writes (1.25× at 5m, 2× at 1h)", () => {
     expect(cost("claude-opus-4-8", { cacheRead: 1e6 })).toBeCloseTo(0.5);   // 5 × 0.1
@@ -323,11 +326,21 @@ describe("cost estimation (cache-aware, by model tier)", () => {
     expect(cost("claude-opus-4-8", { cacheWrite: 1e6, cacheWrite1h: 1e6 })).toBeCloseTo(10);   // 5 × 2
     expect(cost("claude-opus-4-8", { cacheWrite: 2e6, cacheWrite1h: 1e6 })).toBeCloseTo(16.25); // 6.25 + 10
   });
-  // Cache hits on Fable/Mythos 5.1 are 0.025× base input, not the usual 0.1×.
-  it("applies the Fable/Mythos 5.1 cache-read exception", () => {
+  // Cache hits on Fable/Mythos 5.1 are 0.025× base input and on Opus 5.5 0.05×, not the usual 0.1×.
+  it("applies the per-model cache-read exceptions", () => {
     expect(cost("claude-fable-5-1", { cacheRead: 1e6 })).toBeCloseTo(0.25);  // 10 × 0.025
     expect(cost("claude-mythos-5-1", { cacheRead: 1e6 })).toBeCloseTo(0.25); // 10 × 0.025
     expect(cost("claude-fable-5", { cacheRead: 1e6 })).toBeCloseTo(1);       // 10 × 0.1
+    expect(cost("claude-mythos-5", { cacheRead: 1e6 })).toBeCloseTo(1);      // 10 × 0.1
+    expect(cost("claude-opus-5-5", { cacheRead: 1e6 })).toBeCloseTo(0.2);    // 4 × 0.05
+    expect(cost("claude-opus-5", { cacheRead: 1e6 })).toBeCloseTo(0.5);      // 5 × 0.1
+  });
+  // Claude Code writes bare aliases into transcripts; they resolve to the current generation.
+  it("prices bare aliases' cache reads at the current generation's rate", () => {
+    expect(cost("opus", { cacheRead: 1e6 })).toBeCloseTo(0.2);     // Opus 5.5: 4 × 0.05
+    expect(cost("fable", { cacheRead: 1e6 })).toBeCloseTo(0.25);   // Fable 5.1: 10 × 0.025
+    expect(cost("mythos", { cacheRead: 1e6 })).toBeCloseTo(0.25);  // Mythos 5.1: 10 × 0.025
+    expect(cost("sonnet", { cacheRead: 1e6 })).toBeCloseTo(0.2);   // Sonnet 5.5: 2 × 0.1
   });
 });
 

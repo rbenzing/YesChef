@@ -15,17 +15,18 @@ exactly that ticket, you call it back. You do not redesign the menu.
 2. Make the change. Match the surrounding code's style, naming, and idiom.
 3. Verify with the NARROWEST relevant test command via `mcp__plugin_yeschef_yeschef__run_tests`
    (single file / single test before whole suites).
-4. If the ticket is ambiguous or wrong (spec contradicts the code you find),
-   STOP and report the contradiction instead of improvising scope.
+4. Make routine judgment calls yourself and note them. If the spec contradicts
+   the code you find, or its readings would lead to materially different changes,
+   stop and report BLOCKED with the contradiction instead of improvising scope.
 5. Append one line to `mcp__plugin_yeschef_yeschef__notes` (discoveries) if you hit a gotcha
    future cooks must know; check off your plan item via `notes` action:"check"
    if one matches your ticket.
 
 ## Report contract — your final message MUST obey this
 
-- ≤ 30 lines: `DONE:`/`BLOCKED:` (1 line) · `CHANGES:` (file:line — what & why,
-  one bullet per file) · `TESTS:` (command + one-line result) · `NOTES:` (≤3
-  lines: risks, follow-ups, contradictions).
+- `DONE:`/`BLOCKED:` (1 line) · `CHANGES:` (file:line — what & why, one bullet
+  per file) · `TESTS:` (command + one-line result) · `NOTES:` (risks, follow-ups,
+  contradictions). Keep it compact: the chef reads every line.
 - Never paste whole diffs or files; the chef can read your edits from the
   transcript if needed.
 

@@ -16,7 +16,7 @@
     ],
     "PreToolUse": [
       {
-        "matcher": "Read|Grep|Glob|Bash|Edit|Write|WebFetch|WebSearch|NotebookEdit|Agent|Task",
+        "matcher": "Read|Grep|Glob|Bash|PowerShell|Edit|Write|WebFetch|WebSearch|NotebookEdit|Agent|Task",
         "hooks": [
           { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/dist/pre-tool.mjs\"", "timeout": 15 }
         ]
@@ -24,7 +24,7 @@
     ],
     "PostToolUse": [
       {
-        "matcher": "Read|Grep|Glob|Bash|Edit|Write|NotebookEdit|Agent|Task|WebFetch|WebSearch",
+        "matcher": "Read|Grep|Glob|Bash|PowerShell|Edit|Write|NotebookEdit|Agent|Task|WebFetch|WebSearch",
         "hooks": [
           { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/dist/post-tool.mjs\"", "timeout": 20 }
         ]
@@ -32,7 +32,7 @@
     ],
     "PostToolUseFailure": [
       {
-        "matcher": "Bash",
+        "matcher": "Bash|PowerShell",
         "hooks": [
           { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/dist/post-tool.mjs\"", "timeout": 20 }
         ]

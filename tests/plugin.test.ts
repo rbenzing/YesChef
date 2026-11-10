@@ -21,6 +21,18 @@ const registered = new Set(
   [...readFileSync(join(ROOT, "src/mcp/server.ts"), "utf8").matchAll(/server\.tool\(\s*"(\w+)"/g)].map((m) => m[1]),
 );
 
+// The shell tool is Bash on POSIX and PowerShell on Windows. A matcher that names
+// only one silently drops the guards and output compaction on the other platform.
+describe("hook matchers", () => {
+  it("name PowerShell wherever they name Bash", () => {
+    const hooks = JSON.parse(readFileSync(join(ROOT, "hooks/hooks.json"), "utf8")).hooks as Record<string, Array<{ matcher?: string }>>;
+    const matchers = Object.values(hooks).flat().flatMap((h) => (h.matcher ? [h.matcher.split("|")] : []));
+    const withBash = matchers.filter((names) => names.includes("Bash"));
+    expect(withBash.length).toBeGreaterThan(0);
+    expect(withBash.filter((names) => !names.includes("PowerShell"))).toEqual([]);
+  });
+});
+
 describe("plugin MCP tool references", () => {
   it("finds the registered tools", () => {
     expect([...registered].sort()).toEqual(["batch_digest", "folder_desc", "notes", "run_tests"]);

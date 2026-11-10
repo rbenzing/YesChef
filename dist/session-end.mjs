@@ -49,8 +49,8 @@ var DEFAULTS = {
   duplicateRead: { ttlMinutes: 10, warnOn: 2, blockOn: 3 },
   stop: { maxConsecutiveBlocks: 2 },
   telemetry: { enabled: true },
-  // Rates verified against platform.claude.com/docs/en/about-claude/pricing (2026-09-18);
-  // Opus 5.5 / bare-alias rates against the claude-api skill model table (cached 2026-09-25).
+  // Rates verified against platform.claude.com/docs/en/about-claude/pricing and
+  // .../build-with-claude/fast-mode (2026-11-10).
   // Keys match as substrings of the model id, LONGEST key first. A bare family key is
   // the current generation's rate, because Claude Code also writes bare aliases
   // ("sonnet", "opus") into the transcript; older generations that are priced
@@ -58,17 +58,24 @@ var DEFAULTS = {
   // they remain billable on partner clouds after first-party retirement.
   pricing: {
     models: {
-      "haiku-3-5": [0.8, 4],
-      // retired (Bedrock/Google Cloud only)
-      haiku: [1, 5],
+      "3-5-haiku": [0.8, 4],
+      // Haiku 3.5 (claude-3-5-haiku-…), retired (Bedrock/Google Cloud only)
+      "haiku-4": [1, 5],
       // Haiku 4.5
+      haiku: [0.1, 0.5],
+      // Haiku 5.5, prompts up to 100K tokens (see longPrompt)
       "sonnet-4": [3, 15],
       // Sonnet 4.6 / 4.5 / 4
       sonnet: [2, 10],
       // Sonnet 5.5 / 5
-      fable: [10, 50],
-      mythos: [10, 50],
+      "fable-5": [10, 50],
+      "mythos-5": [10, 50],
       // 5.1 / 5
+      "fable-5-2": [8, 40],
+      "mythos-5-2": [8, 40],
+      fable: [8, 40],
+      mythos: [8, 40],
+      // bare alias → 5.2
       "opus-4-1": [15, 75],
       // retired (Bedrock/Google Cloud only)
       "opus-4-2025": [15, 75],
@@ -84,10 +91,18 @@ var DEFAULTS = {
     },
     default: [5, 25],
     // unknown model → Opus-tier
+    // Haiku 5.5 is priced by prompt length: a request whose prompt (all input tokens,
+    // cache reads and writes included) is over 100K pays this card for the whole request.
+    // Keyed on the full id: a bare "haiku" key would also catch Haiku 4.5, which has one card.
+    longPrompt: { "haiku-5-5": { overTokens: 1e5, rates: [0.5, 2.5] } },
+    fastMult: 2,
+    // Fable/Mythos 5.2, Opus 5.5 / 5 / 4.8; cache multipliers stack on top
     cacheReadMult: 0.1,
     // Exceptions to the 0.1× cache-hit rate. The bare aliases resolve to the current
     // generation, so they carry its rate while older generations fall back to 0.1×.
     cacheReadMultByModel: {
+      "fable-5-2": 0.025,
+      "mythos-5-2": 0.025,
       "fable-5-1": 0.025,
       "mythos-5-1": 0.025,
       fable: 0.025,
@@ -97,7 +112,11 @@ var DEFAULTS = {
       "opus-5-5": 0.05,
       opus: 0.05,
       "opus-5": 0.1,
-      "opus-4": 0.1
+      "opus-4": 0.1,
+      "sonnet-5-5": 0.05,
+      sonnet: 0.05,
+      "sonnet-5": 0.1,
+      "sonnet-4": 0.1
     },
     cacheWriteMult: 1.25,
     cacheWrite1hMult: 2
@@ -170,9 +189,19 @@ function matchBySubstring(model, table) {
   }
   return void 0;
 }
+var promptTokens = (u) => (u.input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0);
+var LONG_PROMPT_MARK = " (long prompt)";
+var FAST_MARK = " (fast)";
+function billedModel(model, u, pricing = DEFAULTS.pricing) {
+  const long = matchBySubstring(model, pricing.longPrompt);
+  return model + (long && promptTokens(u) > long.overTokens ? LONG_PROMPT_MARK : "") + (u.speed === "fast" ? FAST_MARK : "");
+}
 function priceFor(model, pricing = DEFAULTS.pricing) {
-  const [inP, outP] = matchBySubstring(model, pricing.models) ?? pricing.default;
-  return { in: inP, out: outP };
+  const m = model ?? "";
+  const long = m.includes(LONG_PROMPT_MARK) ? matchBySubstring(m, pricing.longPrompt) : void 0;
+  const [inP, outP] = long?.rates ?? matchBySubstring(m, pricing.models) ?? pricing.default;
+  const mult = m.includes(FAST_MARK) ? pricing.fastMult : 1;
+  return { in: inP * mult, out: outP * mult };
 }
 function cacheReadMultFor(model, pricing = DEFAULTS.pricing) {
   return matchBySubstring(model, pricing.cacheReadMultByModel ?? {}) ?? pricing.cacheReadMult;
@@ -191,50 +220,62 @@ function addUsage(b, u) {
   b.cacheWrite1h = (b.cacheWrite1h ?? 0) + (u.cache_creation?.ephemeral_1h_input_tokens ?? 0);
   b.out += u.output_tokens ?? 0;
 }
-function scanUsageInto(filePath, models, tiers, fromSubagentFile) {
-  let seen = false;
-  let contextTokensLast = null;
-  const lines = readFileSync(filePath, "utf8").split("\n");
+function usageTurns(lines) {
+  const turns = [];
+  const indexById = /* @__PURE__ */ new Map();
   for (const line of lines) {
     if (!line.includes('"usage"')) continue;
     try {
       const obj = JSON.parse(line);
       const u = obj?.message?.usage ?? obj?.usage;
-      if (u && typeof u === "object") {
-        seen = true;
-        const model = obj?.message?.model ?? obj?.model ?? "unknown";
-        const mu = models[model] ?? (models[model] = { ...emptyBuckets(), turns: 0 });
-        addUsage(mu, u);
-        mu.turns++;
-        const tok = (u.input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0) + (u.output_tokens ?? 0);
-        const side = obj?.isSidechain === true || fromSubagentFile;
-        if (isTopTierModel(model)) {
-          if (side) tiers.topSide += tok;
-          else tiers.topMain += tok;
-        } else {
-          if (side) tiers.cheapSide += tok;
-          else tiers.cheapMain += tok;
-        }
-        contextTokensLast = (u.input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0);
+      if (!u || typeof u !== "object") continue;
+      const id = obj?.message?.id;
+      const at = typeof id === "string" ? indexById.get(id) : void 0;
+      if (at !== void 0) {
+        turns[at] = { obj, u };
+        continue;
       }
+      if (typeof id === "string") indexById.set(id, turns.length);
+      turns.push({ obj, u });
     } catch {
     }
   }
-  return { seen, contextTokensLast };
+  return turns;
 }
-function readUsageByModel(transcriptPath) {
+function scanUsageInto(filePath, models, tiers, fromSubagentFile, pricing) {
+  let contextTokensLast = null;
+  const turns = usageTurns(readFileSync(filePath, "utf8").split("\n"));
+  for (const { obj, u } of turns) {
+    const model = billedModel(obj?.message?.model ?? obj?.model ?? "unknown", u, pricing);
+    const mu = models[model] ?? (models[model] = { ...emptyBuckets(), turns: 0 });
+    addUsage(mu, u);
+    mu.turns++;
+    const tok = promptTokens(u) + (u.output_tokens ?? 0);
+    const side = obj?.isSidechain === true || fromSubagentFile;
+    if (isTopTierModel(model)) {
+      if (side) tiers.topSide += tok;
+      else tiers.topMain += tok;
+    } else {
+      if (side) tiers.cheapSide += tok;
+      else tiers.cheapMain += tok;
+    }
+    contextTokensLast = promptTokens(u);
+  }
+  return { seen: turns.length > 0, contextTokensLast };
+}
+function readUsageByModel(transcriptPath, pricing = DEFAULTS.pricing) {
   if (!transcriptPath || !existsSync(transcriptPath)) return null;
   try {
     const models = {};
     const tiers = emptyTiers();
-    const main = scanUsageInto(transcriptPath, models, tiers, false);
+    const main = scanUsageInto(transcriptPath, models, tiers, false, pricing);
     let seen = main.seen;
     const subDir = join(transcriptPath.replace(/\.jsonl$/i, ""), "subagents");
     if (existsSync(subDir)) {
       for (const f of readdirSync(subDir)) {
         if (!f.endsWith(".jsonl")) continue;
         try {
-          if (scanUsageInto(join(subDir, f), models, tiers, true).seen) seen = true;
+          if (scanUsageInto(join(subDir, f), models, tiers, true, pricing).seen) seen = true;
         } catch {
         }
       }
@@ -266,7 +307,7 @@ try {
   const cfg = loadConfig(cwd);
   if (cfg.telemetry.enabled) {
     const state = loadState(cwd, sessionId);
-    const usage = readUsageByModel(input.transcript_path);
+    const usage = readUsageByModel(input.transcript_path, cfg.pricing);
     let perModel = null;
     let estCostUSD = null;
     if (usage) {

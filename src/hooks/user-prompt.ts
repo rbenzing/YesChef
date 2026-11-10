@@ -33,7 +33,7 @@ try {
   // (swallowed by the catch, silently killing the reminder too); usd <= 0 means off.
   const usd = Number(cfg.budget.usd);
   if (Number.isFinite(usd) && usd > 0) {
-    const usage = readUsage(input.transcript_path);
+    const usage = readUsage(input.transcript_path, cfg.pricing);
     if (usage) {
       const est = estimateCostUSD(usage, cfg.pricing);
       const frac = est / usd;

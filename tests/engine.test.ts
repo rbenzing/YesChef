@@ -1,13 +1,13 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { mkdtempSync, writeFileSync, mkdirSync } from "node:fs";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { detectLoop, pushCall } from "../src/lib/loop.js";
 import { compactTestOutput, truncateGeneric, looksLikeTestCommand, extractResponseText, isTestFailure } from "../src/lib/compact.js";
 import { runBatchDigest } from "../src/lib/digest.js";
 import { buildFolderDescription } from "../src/lib/folderdesc.js";
-import { buildShellCommand, readUsage, estimateCostUSD, isTopTierModel, readUsageByModel } from "../src/lib/core.js";
+import { buildShellCommand, canonicalDrive, readUsage, estimateCostUSD, isTopTierModel, readUsageByModel, billedModel, costOfBuckets } from "../src/lib/core.js";
 
 function tmp(): string {
   return mkdtempSync(join(tmpdir(), "yeschef-test-"));
@@ -273,6 +273,38 @@ describe("transcript usage (budget estimation)", () => {
     expect(u.buckets.out).toBe(30);      // 10 + 20 across blocks
     expect(u.model).toBe("claude-sonnet-5");
   });
+  // Claude Code writes one transcript line per content block, and every line of one API
+  // response repeats that response's message id and usage. Summing lines would bill a
+  // response with a thinking block, a text block and three tool calls five times.
+  it("counts an API response once however many transcript lines repeat its usage", () => {
+    const p = join(tmp(), "transcript-blocks.jsonl");
+    const line = (id: string | undefined, u: any) => JSON.stringify({ message: { id, model: "claude-opus-5", usage: u } });
+    const first = { input_tokens: 100, output_tokens: 10, cache_read_input_tokens: 1000 };
+    const second = { input_tokens: 200, output_tokens: 20 };
+    writeFileSync(p, [
+      line("msg_a", first), line("msg_a", first), line("msg_a", first),   // thinking, text, tool_use
+      line("msg_b", second), line("msg_b", second),
+      line(undefined, { input_tokens: 1, output_tokens: 1 }),              // no id → its own turn
+      line(undefined, { input_tokens: 1, output_tokens: 1 }),
+    ].join("\n") + "\n");
+    const tail = readUsage(p)!;
+    expect(tail.buckets.inTok).toBe(302);       // 100 + 200 + 1 + 1
+    expect(tail.buckets.cacheRead).toBe(1000);
+    expect(tail.buckets.out).toBe(32);          // 10 + 20 + 1 + 1
+    const all = readUsageByModel(p)!;
+    expect(all.models["claude-opus-5"]!.turns).toBe(4);
+    expect(all.models["claude-opus-5"]!.inTok).toBe(302);
+    expect(all.tiers.topMain).toBe(1334);       // 1110 + 220 + 2 + 2
+  });
+  // If a later line of a response carries fuller usage (output still streaming when
+  // the first block was written), the last line is the billed figure.
+  it("takes the last line's usage when one response's lines disagree", () => {
+    const p = join(tmp(), "transcript-streaming.jsonl");
+    const line = (out: number) => JSON.stringify({ message: { id: "msg_a", model: "claude-opus-5", usage: { input_tokens: 100, output_tokens: out } } });
+    writeFileSync(p, [line(1), line(40), line(75)].join("\n") + "\n");
+    expect(readUsage(p)!.buckets.out).toBe(75);
+    expect(readUsageByModel(p)!.models["claude-opus-5"]!.out).toBe(75);
+  });
   // Claude Code splits cache writes by TTL under cache_creation; the 1h slice bills at
   // 2x base input instead of 1.25x, so it has to survive into its own bucket.
   it("captures the 1-hour slice of cache writes without double-counting the total", () => {
@@ -304,6 +336,17 @@ describe("cost estimation (cache-aware, by model tier)", () => {
     expect(cost("claude-fable-5", { inTok: 1e6, out: 1e6 })).toBeCloseTo(60);    // 10 + 50
     expect(cost(null, { inTok: 1e6, out: 1e6 })).toBeCloseTo(30);
   });
+  // Each generation below repriced its family: Fable 5.2 dropped to $8/$40 and Haiku 5.5
+  // to $0.10/$0.50, while the generations before them kept their rates.
+  it("prices the current generation apart from the one before it", () => {
+    expect(cost("claude-fable-5-2", { inTok: 1e6, out: 1e6 })).toBeCloseTo(48);  // 8 + 40
+    expect(cost("claude-mythos-5-2", { inTok: 1e6, out: 1e6 })).toBeCloseTo(48);
+    expect(cost("claude-fable-5-1", { inTok: 1e6, out: 1e6 })).toBeCloseTo(60);  // 10 + 50
+    expect(cost("claude-mythos-5-1", { inTok: 1e6, out: 1e6 })).toBeCloseTo(60);
+    expect(cost("claude-haiku-5-5", { inTok: 1e6, out: 1e6 })).toBeCloseTo(0.6); // 0.1 + 0.5
+    expect(cost("claude-haiku-4-5-20251001", { inTok: 1e6, out: 1e6 })).toBeCloseTo(6); // 1 + 5
+    expect(cost("claude-3-5-haiku-20241022", { inTok: 1e6, out: 1e6 })).toBeCloseTo(4.8); // 0.8 + 4
+  });
   // Sonnet 5 is $2/$10 while Sonnet 4.6 and 4.5 stayed at $3/$15, so the specific
   // key has to beat the family key regardless of declaration order.
   it("matches the most specific model key, not the first one declared", () => {
@@ -312,7 +355,8 @@ describe("cost estimation (cache-aware, by model tier)", () => {
     expect(cost("claude-sonnet-4-5", { inTok: 1e6, out: 1e6 })).toBeCloseTo(18); // 3 + 15
     expect(cost("sonnet", { inTok: 1e6, out: 1e6 })).toBeCloseTo(12);            // bare alias → current gen
     expect(cost("opus", { inTok: 1e6, out: 1e6 })).toBeCloseTo(24);              // bare alias → Opus 5.5
-    expect(cost("haiku", { inTok: 1e6, out: 1e6 })).toBeCloseTo(6);              // bare alias → current gen
+    expect(cost("haiku", { inTok: 1e6, out: 1e6 })).toBeCloseTo(0.6);            // bare alias → Haiku 5.5
+    expect(cost("fable", { inTok: 1e6, out: 1e6 })).toBeCloseTo(48);             // bare alias → Fable 5.2
     expect(cost("claude-opus-4-1", { inTok: 1e6, out: 1e6 })).toBeCloseTo(90);   // 15 + 75
     expect(cost("claude-opus-5", { inTok: 1e6, out: 1e6 })).toBeCloseTo(30);     // 5 + 25
     expect(cost("claude-opus-5-5", { inTok: 1e6, out: 1e6 })).toBeCloseTo(24);   // 4 + 20
@@ -326,8 +370,13 @@ describe("cost estimation (cache-aware, by model tier)", () => {
     expect(cost("claude-opus-4-8", { cacheWrite: 1e6, cacheWrite1h: 1e6 })).toBeCloseTo(10);   // 5 × 2
     expect(cost("claude-opus-4-8", { cacheWrite: 2e6, cacheWrite1h: 1e6 })).toBeCloseTo(16.25); // 6.25 + 10
   });
-  // Cache hits on Fable/Mythos 5.1 are 0.025× base input and on Opus 5.5 0.05×, not the usual 0.1×.
+  // Cache hits on Fable/Mythos 5.1+ are 0.025× base input and on Opus/Sonnet 5.5 0.05×, not the usual 0.1×.
   it("applies the per-model cache-read exceptions", () => {
+    expect(cost("claude-fable-5-2", { cacheRead: 1e6 })).toBeCloseTo(0.2);   // 8 × 0.025
+    expect(cost("claude-mythos-5-2", { cacheRead: 1e6 })).toBeCloseTo(0.2);  // 8 × 0.025
+    expect(cost("claude-sonnet-5-5", { cacheRead: 1e6 })).toBeCloseTo(0.1);  // 2 × 0.05
+    expect(cost("claude-sonnet-5", { cacheRead: 1e6 })).toBeCloseTo(0.2);    // 2 × 0.1
+    expect(cost("claude-haiku-5-5", { cacheRead: 1e6 })).toBeCloseTo(0.01);  // 0.1 × 0.1
     expect(cost("claude-fable-5-1", { cacheRead: 1e6 })).toBeCloseTo(0.25);  // 10 × 0.025
     expect(cost("claude-mythos-5-1", { cacheRead: 1e6 })).toBeCloseTo(0.25); // 10 × 0.025
     expect(cost("claude-fable-5", { cacheRead: 1e6 })).toBeCloseTo(1);       // 10 × 0.1
@@ -338,9 +387,69 @@ describe("cost estimation (cache-aware, by model tier)", () => {
   // Claude Code writes bare aliases into transcripts; they resolve to the current generation.
   it("prices bare aliases' cache reads at the current generation's rate", () => {
     expect(cost("opus", { cacheRead: 1e6 })).toBeCloseTo(0.2);     // Opus 5.5: 4 × 0.05
-    expect(cost("fable", { cacheRead: 1e6 })).toBeCloseTo(0.25);   // Fable 5.1: 10 × 0.025
-    expect(cost("mythos", { cacheRead: 1e6 })).toBeCloseTo(0.25);  // Mythos 5.1: 10 × 0.025
-    expect(cost("sonnet", { cacheRead: 1e6 })).toBeCloseTo(0.2);   // Sonnet 5.5: 2 × 0.1
+    expect(cost("fable", { cacheRead: 1e6 })).toBeCloseTo(0.2);    // Fable 5.2: 8 × 0.025
+    expect(cost("mythos", { cacheRead: 1e6 })).toBeCloseTo(0.2);   // Mythos 5.2: 8 × 0.025
+    expect(cost("sonnet", { cacheRead: 1e6 })).toBeCloseTo(0.1);   // Sonnet 5.5: 2 × 0.05
+  });
+});
+
+// The API prices each request on its own, and two things move a request off its
+// model's standard card: a prompt over 100K tokens on Haiku 5.5, and fast mode.
+describe("per-turn rate cards (long prompt, fast mode)", () => {
+  const haiku = "claude-haiku-5-5";
+  const cost = (model: string, b: Partial<{ inTok: number; cacheRead: number; cacheWrite: number; cacheWrite1h: number; out: number }>) =>
+    costOfBuckets({ inTok: 0, cacheRead: 0, cacheWrite: 0, out: 0, ...b }, model);
+
+  it("moves a Haiku 5.5 turn to the long-prompt card only above 100K prompt tokens", () => {
+    expect(billedModel(haiku, { input_tokens: 100_000 })).toBe(haiku);          // "over 100,000": the boundary stays cheap
+    expect(billedModel(haiku, { input_tokens: 100_001 })).toBe(`${haiku} (long prompt)`);
+  });
+  it("counts cache reads and cache writes toward the prompt length", () => {
+    const u = { input_tokens: 10, cache_read_input_tokens: 90_000, cache_creation_input_tokens: 10_000 };
+    expect(billedModel(haiku, u)).toBe(`${haiku} (long prompt)`);               // 100,010 in total
+    expect(billedModel(haiku, { ...u, cache_creation_input_tokens: 0 })).toBe(haiku);
+  });
+  it("leaves models with a single rate card alone, whatever the prompt length", () => {
+    for (const m of ["claude-haiku-4-5", "claude-sonnet-5-5", "claude-fable-5-2", "haiku"])
+      expect(billedModel(m, { input_tokens: 900_000 })).toBe(m);
+  });
+  it("prices the long-prompt card at $0.50/$2.50 with the usual cache multipliers", () => {
+    const long = `${haiku} (long prompt)`;
+    expect(cost(long, { inTok: 1e6, out: 1e6 })).toBeCloseTo(3);      // 0.5 + 2.5
+    expect(cost(long, { cacheRead: 1e6 })).toBeCloseTo(0.05);         // 0.5 × 0.1
+    expect(cost(long, { cacheWrite: 1e6 })).toBeCloseTo(0.625);       // 0.5 × 1.25
+    expect(cost(long, { cacheWrite: 1e6, cacheWrite1h: 1e6 })).toBeCloseTo(1); // 0.5 × 2
+  });
+  it("marks a fast-mode turn and prices it at twice the standard card, cache multipliers on top", () => {
+    expect(billedModel("claude-opus-5-5", { input_tokens: 5, speed: "fast" })).toBe("claude-opus-5-5 (fast)");
+    expect(billedModel("claude-opus-5-5", { input_tokens: 5, speed: "standard" })).toBe("claude-opus-5-5");
+    expect(cost("claude-opus-5-5 (fast)", { inTok: 1e6, out: 1e6 })).toBeCloseTo(48);   // 8 + 40
+    expect(cost("claude-fable-5-2 (fast)", { inTok: 1e6, out: 1e6 })).toBeCloseTo(96);  // 16 + 80
+    expect(cost("claude-opus-5-5 (fast)", { cacheRead: 1e6 })).toBeCloseTo(0.4);        // 8 × 0.05
+  });
+
+  // The same model on two cards must not be summed into one bucket: the report
+  // prices each bucket at one rate.
+  it("keeps a model's turns on different cards in separate per-model buckets", () => {
+    const p = join(tmp(), "transcript-cards.jsonl");
+    const turn = (u: any) => JSON.stringify({ message: { model: haiku, usage: u } });
+    writeFileSync(p, [
+      turn({ input_tokens: 1_000, output_tokens: 100 }),
+      turn({ input_tokens: 500, cache_read_input_tokens: 150_000, output_tokens: 200 }),
+    ].join("\n") + "\n");
+    const u = readUsageByModel(p)!;
+    expect(Object.keys(u.models).sort()).toEqual([haiku, `${haiku} (long prompt)`]);
+    expect(u.models[haiku]!.inTok).toBe(1_000);
+    expect(u.models[`${haiku} (long prompt)`]!.cacheRead).toBe(150_000);
+    expect(u.tiers.cheapMain).toBe(151_800);   // both cards are still the delegated tier
+    expect(u.tiers.topMain).toBe(0);
+  });
+  it("prices the budget tail at the last turn's card", () => {
+    const p = join(tmp(), "transcript-tail-card.jsonl");
+    writeFileSync(p, JSON.stringify({ message: { model: haiku, usage: { input_tokens: 200_000, output_tokens: 0 } } }) + "\n");
+    const u = readUsage(p)!;
+    expect(u.model).toBe(`${haiku} (long prompt)`);
+    expect(estimateCostUSD(u)).toBeCloseTo(0.1);   // 200K × $0.50/MTok
   });
 });
 
@@ -349,11 +458,11 @@ describe("cost estimation (cache-aware, by model tier)", () => {
 // tokens apart from subagent ones - isolation and delegation are different levers.
 describe("model tier classification", () => {
   it("counts the frontier family as top-tier", () => {
-    for (const m of ["claude-opus-5", "claude-opus-4-8", "claude-fable-5-1", "claude-mythos-5-1", "opus"])
+    for (const m of ["claude-opus-5", "claude-opus-4-8", "claude-fable-5-1", "claude-mythos-5-1", "claude-fable-5-2", "claude-opus-5-5 (fast)", "opus"])
       expect(isTopTierModel(m)).toBe(true);
   });
   it("counts sonnet and haiku as delegated, not top-tier", () => {
-    for (const m of ["claude-sonnet-5", "claude-sonnet-4-6", "claude-haiku-4-5-20251001", "haiku", "sonnet"])
+    for (const m of ["claude-sonnet-5", "claude-sonnet-4-6", "claude-haiku-4-5-20251001", "claude-haiku-5-5", "claude-haiku-5-5 (long prompt)", "haiku", "sonnet"])
       expect(isTopTierModel(m)).toBe(false);
   });
   it("treats an unknown model as top-tier, so the metric never flatters itself", () => {
@@ -411,6 +520,25 @@ describe("shell invocation (run_tests)", () => {
   // a quote, strip the first and last quote. The whole reason run_tests wraps the
   // command is so this strip recovers exactly the original — no lost leading quote.
   const cmdSlashS = (s: string) => (s.startsWith('"') && s.endsWith('"') ? s.slice(1, -1) : s);
+
+  // VS Code hands the plugin `c:\proj`; a child spawned there sees that exact string
+  // as its cwd, and vitest then finds no suites because its modules resolve under `C:\`.
+  it("uppercases a lowercase Windows drive letter and leaves every other path alone", () => {
+    expect(canonicalDrive("c:\\GIT\\YesChef")).toBe("C:\\GIT\\YesChef");
+    expect(canonicalDrive("c:/GIT/YesChef")).toBe("C:/GIT/YesChef");
+    expect(canonicalDrive("C:\\GIT\\YesChef")).toBe("C:\\GIT\\YesChef");
+    expect(canonicalDrive("/home/me/proj")).toBe("/home/me/proj");
+    expect(canonicalDrive("\\\\server\\share\\proj")).toBe("\\\\server\\share\\proj");
+    expect(canonicalDrive("")).toBe("");
+  });
+  it.runIf(process.platform === "win32")("gives a child process the uppercase drive as its working directory", () => {
+    const dir = tmp();
+    const lower = dir.charAt(0).toLowerCase() + dir.slice(1);
+    const sh = buildShellCommand(`"${process.execPath}" -e "process.stdout.write(process.cwd())"`);
+    const run = (cwd: string) => spawnSync(sh.file, sh.args, { cwd, encoding: "utf8", windowsVerbatimArguments: sh.verbatim }).stdout;
+    expect(run(lower).charAt(0)).toBe(lower.charAt(0));                  // the bug: the child inherits the lowercase string
+    expect(run(canonicalDrive(lower)).charAt(0)).toBe(dir.charAt(0).toUpperCase());
+  });
 
   it("uses /bin/sh -c and passes the command verbatim on POSIX", () => {
     const sh = buildShellCommand("npx vitest run", "linux");

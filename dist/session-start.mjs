@@ -50,8 +50,8 @@ var DEFAULTS = {
   duplicateRead: { ttlMinutes: 10, warnOn: 2, blockOn: 3 },
   stop: { maxConsecutiveBlocks: 2 },
   telemetry: { enabled: true },
-  // Rates verified against platform.claude.com/docs/en/about-claude/pricing (2026-09-18);
-  // Opus 5.5 / bare-alias rates against the claude-api skill model table (cached 2026-09-25).
+  // Rates verified against platform.claude.com/docs/en/about-claude/pricing and
+  // .../build-with-claude/fast-mode (2026-11-10).
   // Keys match as substrings of the model id, LONGEST key first. A bare family key is
   // the current generation's rate, because Claude Code also writes bare aliases
   // ("sonnet", "opus") into the transcript; older generations that are priced
@@ -59,17 +59,24 @@ var DEFAULTS = {
   // they remain billable on partner clouds after first-party retirement.
   pricing: {
     models: {
-      "haiku-3-5": [0.8, 4],
-      // retired (Bedrock/Google Cloud only)
-      haiku: [1, 5],
+      "3-5-haiku": [0.8, 4],
+      // Haiku 3.5 (claude-3-5-haiku-…), retired (Bedrock/Google Cloud only)
+      "haiku-4": [1, 5],
       // Haiku 4.5
+      haiku: [0.1, 0.5],
+      // Haiku 5.5, prompts up to 100K tokens (see longPrompt)
       "sonnet-4": [3, 15],
       // Sonnet 4.6 / 4.5 / 4
       sonnet: [2, 10],
       // Sonnet 5.5 / 5
-      fable: [10, 50],
-      mythos: [10, 50],
+      "fable-5": [10, 50],
+      "mythos-5": [10, 50],
       // 5.1 / 5
+      "fable-5-2": [8, 40],
+      "mythos-5-2": [8, 40],
+      fable: [8, 40],
+      mythos: [8, 40],
+      // bare alias → 5.2
       "opus-4-1": [15, 75],
       // retired (Bedrock/Google Cloud only)
       "opus-4-2025": [15, 75],
@@ -85,10 +92,18 @@ var DEFAULTS = {
     },
     default: [5, 25],
     // unknown model → Opus-tier
+    // Haiku 5.5 is priced by prompt length: a request whose prompt (all input tokens,
+    // cache reads and writes included) is over 100K pays this card for the whole request.
+    // Keyed on the full id: a bare "haiku" key would also catch Haiku 4.5, which has one card.
+    longPrompt: { "haiku-5-5": { overTokens: 1e5, rates: [0.5, 2.5] } },
+    fastMult: 2,
+    // Fable/Mythos 5.2, Opus 5.5 / 5 / 4.8; cache multipliers stack on top
     cacheReadMult: 0.1,
     // Exceptions to the 0.1× cache-hit rate. The bare aliases resolve to the current
     // generation, so they carry its rate while older generations fall back to 0.1×.
     cacheReadMultByModel: {
+      "fable-5-2": 0.025,
+      "mythos-5-2": 0.025,
       "fable-5-1": 0.025,
       "mythos-5-1": 0.025,
       fable: 0.025,
@@ -98,7 +113,11 @@ var DEFAULTS = {
       "opus-5-5": 0.05,
       opus: 0.05,
       "opus-5": 0.1,
-      "opus-4": 0.1
+      "opus-4": 0.1,
+      "sonnet-5-5": 0.05,
+      sonnet: 0.05,
+      "sonnet-5": 0.1,
+      "sonnet-4": 0.1
     },
     cacheWriteMult: 1.25,
     cacheWrite1hMult: 2

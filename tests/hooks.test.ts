@@ -83,6 +83,35 @@ describe("post-tool compression", () => {
     expect(r.hookSpecificOutput.updatedToolOutput.stdout.length).toBeLessThan(big.length / 3);
     expect(r.updatedToolOutput).toBeUndefined(); // no undocumented top-level duplicate
   });
+  // Windows sessions run shell commands through the PowerShell tool, whose result
+  // has the same stdout/stderr shape as Bash's.
+  it("gives PowerShell output the same truncation as Bash output", () => {
+    const big = Array.from({ length: 900 }, (_, i) => `build line ${i}`).join("\n");
+    const r = runHook("post-tool.mjs", {
+      hook_event_name: "PostToolUse", tool_name: "PowerShell",
+      tool_input: { command: "msbuild /t:Build" }, tool_response: { stdout: big, stderr: "", interrupted: false, isImage: false },
+    });
+    const out = r.hookSpecificOutput.updatedToolOutput;
+    expect(out.stdout).toContain("[yeschef] truncated");
+    expect(out.stdout.length).toBeLessThan(big.length / 3);
+    expect(out.interrupted).toBe(false);   // the rest of the result shape survives the rewrite
+  });
+  it("compacts a PowerShell test run and records its result for the stop guard", () => {
+    const green = "progress line\n".repeat(80) + " Test Files  4 passed (4)\n      Tests  93 passed (93)\n";
+    const r = runHook("post-tool.mjs", {
+      hook_event_name: "PostToolUse", tool_name: "PowerShell",
+      tool_input: { command: "Set-Location -LiteralPath 'C:\\proj'; npx vitest run" },
+      tool_response: { stdout: green, stderr: "", interrupted: false, isImage: false },
+    });
+    expect(r.hookSpecificOutput.updatedToolOutput.stdout).toContain("[yeschef] tests green");
+    const status = JSON.parse(readFileSync(join(home, "state", slug(cwd), "test-status.json"), "utf8"));
+    expect(status.failing).toBe(false);
+  });
+  it("nudges after a PowerShell command fails twice at the tool level", () => {
+    const call = { hook_event_name: "PostToolUseFailure", tool_name: "PowerShell", tool_input: { command: "npm run build" } };
+    expect(runHook("post-tool.mjs", call)).toBeNull();
+    expect(JSON.stringify(runHook("post-tool.mjs", call))).toContain("failed twice");
+  });
   it("still truncates huge test-command output the compactor does not recognize", () => {
     // Unknown reporter: compactTestOutput returns "unchanged" — the generic
     // size cap must catch it (same fallback run_tests applies in server.ts).

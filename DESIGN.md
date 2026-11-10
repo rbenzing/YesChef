@@ -19,8 +19,8 @@ subagents, skills, commands, workflows, statusline**.
 | # | BouzéCode lever | BouzéCode mechanism (owns the loop) | YesChef mechanism (plugin surface) |
 |---|---|---|---|
 | 1 | **Fewer turns** | DAG executor, `depends_on`, 3-turn floor (Discover→Read→Act), `GetFolderDescription` | `mise-en-place` skill (batch discipline, 3-turn floor); `folder_desc` + `batch_digest` MCP tools (one call = a whole Discover turn); per-turn chef's reminder via `UserPromptSubmit` |
-| 2 | **Less context** | ContextGC tool (trash/keep_snippets/notes), 50-line snippet wrapping, methodology note + 20k structural compaction, tool-result truncation, pytest compaction | **Prevention over cleanup**: brigade subagents absorb bulk reads and return digests; `PostToolUse → updatedToolOutput` compacts test output and truncates oversized Bash spew (overflow → file + pointer); `notes` MCP tool = shared mise-en-place scratchpad with structural compaction; duplicate-read guardrail |
-| 3 | **Less output** | "Think ≤15 lines then ACT" injection, thinking overflow cap | "Act once you know enough" house rule + skill; compact digest contracts for subagent final outputs. Thinking depth itself is the session's effort setting (thinking is always on for Opus 5.5 / Fable 5.1) |
+| 2 | **Less context** | ContextGC tool (trash/keep_snippets/notes), 50-line snippet wrapping, methodology note + 20k structural compaction, tool-result truncation, pytest compaction | **Prevention over cleanup**: brigade subagents absorb bulk reads and return digests; `PostToolUse → updatedToolOutput` compacts test output and truncates oversized shell spew, Bash or PowerShell (overflow → file + pointer); `notes` MCP tool = shared mise-en-place scratchpad with structural compaction; duplicate-read guardrail |
+| 3 | **Less output** | "Think ≤15 lines then ACT" injection, thinking overflow cap | "Act once you know enough" house rule + skill; compact digest contracts for subagent final outputs. Thinking depth itself is the session's effort setting (thinking is always on for Opus 5.5 and the Fable models) |
 | 4 | **Cache prices** | Fixed block order with `cache_control` breakpoints | Claude Code owns caching natively. YesChef only avoids *breaking* it: stable injection text, append-only placement, no system-prompt churn mid-session |
 
 **Safety stoppers** (BouzéCode's "last resort" layer) map directly:
@@ -139,6 +139,11 @@ These are honest, structural limits of the plugin surface vs. owning the loop:
    *Instead:* effort/thinking level stays the user's choice. The earlier
    "think ≤15 lines" instruction was dropped (2026-09-30 prompt audit): on
    models where thinking is always on, effort is the only real control.
+   The one exception is the scout, pinned to `effort: medium`. Haiku 5.5 is
+   the first Haiku that honors effort, so a scout's cost depends on it: on
+   Claude Code 2.1.293–2.1.316 a subagent inherits the session's level (slow
+   and costly at `xhigh`), and from 2.1.317 it runs at its own model's saved
+   level or default. The pin makes "cheap and fast" hold on both.
 5. **No true DAG `depends_on` in the main thread.** Parallel tool calls exist,
    but no cross-batch dependency scheduling. *Instead:* `batch_digest` collapses
    a whole Discover stage into one call; workflows give real scripted DAGs for

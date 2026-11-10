@@ -87,7 +87,10 @@ export interface YesChefConfig {
   pricing: {
     models: Record<string, [number, number]>;  // model-id substring → [inputUSD/MTok, outputUSD/MTok]; longest key wins
     default: [number, number];                  // unknown model → this pair
-    cacheReadMult: number;                       // cache-hit input multiplier (0.1 for every model but the 5.1 pair)
+    // substring → second rate card for a turn whose prompt exceeds overTokens; longest key wins
+    longPrompt: Record<string, { overTokens: number; rates: [number, number] }>;
+    fastMult: number;                            // fast-mode turns (usage.speed "fast") bill at this multiple of the model's card (2)
+    cacheReadMult: number;                       // cache-hit input multiplier (0.1 unless cacheReadMultByModel says otherwise)
     cacheReadMultByModel: Record<string, number>; // substring → cache-hit multiplier override; longest key wins
     cacheWriteMult: number;                      // 5-minute cache-write input multiplier (1.25)
     cacheWrite1hMult: number;                    // 1-hour cache-write input multiplier (2)
@@ -107,8 +110,8 @@ export const DEFAULTS: YesChefConfig = {
   duplicateRead: { ttlMinutes: 10, warnOn: 2, blockOn: 3 },
   stop: { maxConsecutiveBlocks: 2 },
   telemetry: { enabled: true },
-  // Rates verified against platform.claude.com/docs/en/about-claude/pricing (2026-09-18);
-  // Opus 5.5 / bare-alias rates against the claude-api skill model table (cached 2026-09-25).
+  // Rates verified against platform.claude.com/docs/en/about-claude/pricing and
+  // .../build-with-claude/fast-mode (2026-11-10).
   // Keys match as substrings of the model id, LONGEST key first. A bare family key is
   // the current generation's rate, because Claude Code also writes bare aliases
   // ("sonnet", "opus") into the transcript; older generations that are priced
@@ -116,11 +119,14 @@ export const DEFAULTS: YesChefConfig = {
   // they remain billable on partner clouds after first-party retirement.
   pricing: {
     models: {
-      "haiku-3-5": [0.8, 4],        // retired (Bedrock/Google Cloud only)
-      haiku: [1, 5],                // Haiku 4.5
+      "3-5-haiku": [0.8, 4],        // Haiku 3.5 (claude-3-5-haiku-…), retired (Bedrock/Google Cloud only)
+      "haiku-4": [1, 5],            // Haiku 4.5
+      haiku: [0.1, 0.5],            // Haiku 5.5, prompts up to 100K tokens (see longPrompt)
       "sonnet-4": [3, 15],          // Sonnet 4.6 / 4.5 / 4
       sonnet: [2, 10],              // Sonnet 5.5 / 5
-      fable: [10, 50], mythos: [10, 50], // 5.1 / 5
+      "fable-5": [10, 50], "mythos-5": [10, 50],   // 5.1 / 5
+      "fable-5-2": [8, 40], "mythos-5-2": [8, 40],
+      fable: [8, 40], mythos: [8, 40],             // bare alias → 5.2
       "opus-4-1": [15, 75],         // retired (Bedrock/Google Cloud only)
       "opus-4-2025": [15, 75],      // Opus 4, dated id, retired (Google Cloud only)
       "opus-4": [5, 25],            // Opus 4.8 / 4.7 / 4.6 / 4.5
@@ -129,14 +135,21 @@ export const DEFAULTS: YesChefConfig = {
       opus: [4, 20],                // bare alias → Opus 5.5
     },
     default: [5, 25],   // unknown model → Opus-tier
+    // Haiku 5.5 is priced by prompt length: a request whose prompt (all input tokens,
+    // cache reads and writes included) is over 100K pays this card for the whole request.
+    // Keyed on the full id: a bare "haiku" key would also catch Haiku 4.5, which has one card.
+    longPrompt: { "haiku-5-5": { overTokens: 100_000, rates: [0.5, 2.5] } },
+    fastMult: 2,        // Fable/Mythos 5.2, Opus 5.5 / 5 / 4.8; cache multipliers stack on top
     cacheReadMult: 0.1,
     // Exceptions to the 0.1× cache-hit rate. The bare aliases resolve to the current
     // generation, so they carry its rate while older generations fall back to 0.1×.
     cacheReadMultByModel: {
-      "fable-5-1": 0.025, "mythos-5-1": 0.025, fable: 0.025, mythos: 0.025,
+      "fable-5-2": 0.025, "mythos-5-2": 0.025, "fable-5-1": 0.025, "mythos-5-1": 0.025, fable: 0.025, mythos: 0.025,
       "fable-5": 0.1, "mythos-5": 0.1,
       "opus-5-5": 0.05, opus: 0.05,
       "opus-5": 0.1, "opus-4": 0.1,
+      "sonnet-5-5": 0.05, sonnet: 0.05,
+      "sonnet-5": 0.1, "sonnet-4": 0.1,
     },
     cacheWriteMult: 1.25,
     cacheWrite1hMult: 2,
@@ -312,7 +325,7 @@ export function hashCall(toolName: string, toolInput: any): string {
 
 export interface TokenBuckets {
   inTok: number;        // uncached input tokens (billed 1×)
-  cacheRead: number;    // cache-hit tokens (billed 0.1× base input; 0.025× on Fable/Mythos 5.1)
+  cacheRead: number;    // cache-hit tokens (billed 0.1× base input unless the model has its own rate)
   cacheWrite: number;   // ALL cache-write tokens, both TTLs
   cacheWrite1h?: number; // of which 1-hour-TTL writes, billed 2× instead of 1.25×; absent in pre-existing telemetry
   out: number;          // output tokens
@@ -368,12 +381,36 @@ function matchBySubstring<T>(model: string | null, table: Record<string, T>): T 
   return undefined;
 }
 
-export function priceFor(model: string | null, pricing: Pricing = DEFAULTS.pricing): { in: number; out: number } {
-  const [inP, outP] = matchBySubstring(model, pricing.models) ?? pricing.default;
-  return { in: inP, out: outP };
+const promptTokens = (u: any): number =>
+  (u.input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0);
+
+// Marks billedModel appends to a model id; priceFor reads them back.
+const LONG_PROMPT_MARK = " (long prompt)";
+const FAST_MARK = " (fast)";
+
+/**
+ * The rate card ONE turn bills on, as a model id: the turn's own model, marked when
+ * its usage block selects a card other than the standard one — a long prompt on a
+ * model priced by prompt length, or fast mode. The API prices each request on its
+ * own, so the card is chosen per turn; a marked id is accumulated and reported as
+ * its own row, which also shows when scouts have grown past the cheap card.
+ */
+export function billedModel(model: string, u: any, pricing: Pricing = DEFAULTS.pricing): string {
+  const long = matchBySubstring(model, pricing.longPrompt);
+  return model
+    + (long && promptTokens(u) > long.overTokens ? LONG_PROMPT_MARK : "")
+    + (u.speed === "fast" ? FAST_MARK : "");
 }
 
-/** Cache-hit multiplier: 0.1× of base input except Claude Fable/Mythos 5.1 (0.025×) and Opus 5.5 (0.05×). */
+export function priceFor(model: string | null, pricing: Pricing = DEFAULTS.pricing): { in: number; out: number } {
+  const m = model ?? "";
+  const long = m.includes(LONG_PROMPT_MARK) ? matchBySubstring(m, pricing.longPrompt) : undefined;
+  const [inP, outP] = long?.rates ?? matchBySubstring(m, pricing.models) ?? pricing.default;
+  const mult = m.includes(FAST_MARK) ? pricing.fastMult : 1;
+  return { in: inP * mult, out: outP * mult };
+}
+
+/** Cache-hit multiplier: 0.1× of base input unless the model has its own (Fable/Mythos 5.1+ 0.025×, Opus/Sonnet 5.5 0.05×). */
 export function cacheReadMultFor(model: string | null, pricing: Pricing = DEFAULTS.pricing): number {
   return matchBySubstring(model, pricing.cacheReadMultByModel ?? {}) ?? pricing.cacheReadMult;
 }
@@ -402,10 +439,41 @@ function addUsage(b: TokenBuckets, u: any): void {
   b.out += u.output_tokens ?? 0;
 }
 
+/**
+ * The usage-bearing turns in transcript lines, ONE per API response. Claude Code
+ * writes a line per content block (thinking, text, each tool call), and every line
+ * of one response repeats that response's message id and usage — counting lines
+ * would bill a response once per block. The last line of an id wins; a line
+ * without an id is its own turn. Unparseable lines (a tail read can start
+ * mid-line) are skipped.
+ */
+function usageTurns(lines: string[]): Array<{ obj: any; u: any }> {
+  const turns: Array<{ obj: any; u: any }> = [];
+  const indexById = new Map<string, number>();
+  for (const line of lines) {
+    if (!line.includes('"usage"')) continue;
+    try {
+      const obj = JSON.parse(line);
+      const u = obj?.message?.usage ?? obj?.usage;
+      if (!u || typeof u !== "object") continue;
+      const id = obj?.message?.id;
+      const at = typeof id === "string" ? indexById.get(id) : undefined;
+      if (at !== undefined) { turns[at] = { obj, u }; continue; }
+      if (typeof id === "string") indexById.set(id, turns.length);
+      turns.push({ obj, u });
+    } catch { /* partial or non-JSON line */ }
+  }
+  return turns;
+}
+
 const USAGE_TAIL_BYTES = 262144;
 
-/** Read only the tail of the transcript JSONL and pull the most recent usage block. Estimates only. */
-export function readUsage(transcriptPath: string | undefined): UsageSnapshot | null {
+/**
+ * Read only the tail of the transcript JSONL and pull the most recent usage block.
+ * Estimates only: `model` is the LAST turn's billed model (see billedModel), and the
+ * whole tail is priced at it.
+ */
+export function readUsage(transcriptPath: string | undefined, pricing: Pricing = DEFAULTS.pricing): UsageSnapshot | null {
   if (!transcriptPath || !existsSync(transcriptPath)) return null;
   let fd = -1;
   try {
@@ -422,26 +490,17 @@ export function readUsage(transcriptPath: string | undefined): UsageSnapshot | n
       if (n <= 0) break;
       read += n;
     }
-    // A tail read may start mid-line/mid-char; that first partial line just fails to parse and is skipped.
-    const lines = buf.toString("utf8", 0, read).split("\n").filter(Boolean);
+    const turns = usageTurns(buf.toString("utf8", 0, read).split("\n"));
+    if (turns.length === 0) return null;
     const buckets = emptyBuckets();
     let model: string | null = null;
     let contextTokens = 0;
-    let seen = false;
-    for (const line of lines) {
-      if (!line.includes('"usage"')) continue;
-      try {
-        const obj = JSON.parse(line);
-        const u = obj?.message?.usage ?? obj?.usage;
-        if (u && typeof u === "object") {
-          seen = true;
-          addUsage(buckets, u);                 // sum across the tail window (each turn is billed separately)
-          model = obj?.message?.model ?? model;
-          contextTokens = (u.input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0);
-        }
-      } catch { /* partial line */ }
+    for (const { obj, u } of turns) {
+      addUsage(buckets, u);                 // sum across the tail window (each response is billed separately)
+      const turnModel = obj?.message?.model;
+      if (turnModel) model = billedModel(turnModel, u, pricing);
+      contextTokens = promptTokens(u);
     }
-    if (!seen) return null;
     return { contextTokens, buckets, model };
   } catch {
     return null;
@@ -461,35 +520,26 @@ function scanUsageInto(
   models: Record<string, ModelUsage>,
   tiers: TierTokens,
   fromSubagentFile: boolean,
+  pricing: Pricing,
 ): { seen: boolean; contextTokensLast: number | null } {
-  let seen = false;
   let contextTokensLast: number | null = null;
-  const lines = readFileSync(filePath, "utf8").split("\n");
-  for (const line of lines) {
-    if (!line.includes('"usage"')) continue;
-    try {
-      const obj = JSON.parse(line);
-      const u = obj?.message?.usage ?? obj?.usage;
-      if (u && typeof u === "object") {
-        seen = true;
-        const model = obj?.message?.model ?? obj?.model ?? "unknown";
-        const mu = models[model] ?? (models[model] = { ...emptyBuckets(), turns: 0 });
-        addUsage(mu, u);
-        mu.turns++;
-        const tok = (u.input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0)
-          + (u.cache_creation_input_tokens ?? 0) + (u.output_tokens ?? 0);
-        // Subagent turns carry isSidechain; the file's origin is the fallback.
-        const side = obj?.isSidechain === true || fromSubagentFile;
-        if (isTopTierModel(model)) {
-          if (side) tiers.topSide += tok; else tiers.topMain += tok;
-        } else {
-          if (side) tiers.cheapSide += tok; else tiers.cheapMain += tok;
-        }
-        contextTokensLast = (u.input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0);
-      }
-    } catch { /* partial or non-JSON line */ }
+  const turns = usageTurns(readFileSync(filePath, "utf8").split("\n"));
+  for (const { obj, u } of turns) {
+    const model = billedModel(obj?.message?.model ?? obj?.model ?? "unknown", u, pricing);
+    const mu = models[model] ?? (models[model] = { ...emptyBuckets(), turns: 0 });
+    addUsage(mu, u);
+    mu.turns++;
+    const tok = promptTokens(u) + (u.output_tokens ?? 0);
+    // Subagent turns carry isSidechain; the file's origin is the fallback.
+    const side = obj?.isSidechain === true || fromSubagentFile;
+    if (isTopTierModel(model)) {
+      if (side) tiers.topSide += tok; else tiers.topMain += tok;
+    } else {
+      if (side) tiers.cheapSide += tok; else tiers.cheapMain += tok;
+    }
+    contextTokensLast = promptTokens(u);
   }
-  return { seen, contextTokensLast };
+  return { seen: turns.length > 0, contextTokensLast };
 }
 
 /**
@@ -498,24 +548,26 @@ function scanUsageInto(
  * Claude Code writes to a sibling `<transcript>/subagents/*.jsonl` directory (brigade
  * turns don't appear in the main file — that's where scout/line-cook/expeditor cost
  * lives). Runs once per session (SessionEnd), so full reads are fine here, unlike the
- * tail-only readUsage on the hot path. Buckets are summed per line because each turn
- * is a separately billed API call. contextTokensLast reflects the MAIN transcript's
- * last turn (the live window), ignoring subagents.
+ * tail-only readUsage on the hot path. Buckets are summed per turn because each turn
+ * is a separately billed API call, under its billed model (see billedModel), so a
+ * model can appear once per rate card. contextTokensLast reflects the MAIN
+ * transcript's last turn (the live window), ignoring subagents.
  */
 export function readUsageByModel(
   transcriptPath: string | undefined,
+  pricing: Pricing = DEFAULTS.pricing,
 ): { models: Record<string, ModelUsage>; contextTokensLast: number | null; tiers: TierTokens } | null {
   if (!transcriptPath || !existsSync(transcriptPath)) return null;
   try {
     const models: Record<string, ModelUsage> = {};
     const tiers = emptyTiers();
-    const main = scanUsageInto(transcriptPath, models, tiers, false);
+    const main = scanUsageInto(transcriptPath, models, tiers, false, pricing);
     let seen = main.seen;
     const subDir = join(transcriptPath.replace(/\.jsonl$/i, ""), "subagents");
     if (existsSync(subDir)) {
       for (const f of readdirSync(subDir)) {
         if (!f.endsWith(".jsonl")) continue;   // skip .meta.json siblings
-        try { if (scanUsageInto(join(subDir, f), models, tiers, true).seen) seen = true; } catch { /* skip unreadable */ }
+        try { if (scanUsageInto(join(subDir, f), models, tiers, true, pricing).seen) seen = true; } catch { /* skip unreadable */ }
       }
     }
     if (!seen) return null;
@@ -546,4 +598,15 @@ export function buildShellCommand(
     return { file: "cmd.exe", args: ["/d", "/s", "/c", `"${command}"`], verbatim: true };
   }
   return { file: "/bin/sh", args: ["-c", command], verbatim: false };
+}
+
+/**
+ * A Windows path with its drive letter uppercased. A child process inherits its
+ * working directory as the exact string it was given, and tools that compare
+ * paths as strings break on the case: handed `c:\proj` (what VS Code passes),
+ * vitest resolves its own modules under `C:\proj`, loads itself twice and
+ * reports "No test suite found". Other paths are returned unchanged.
+ */
+export function canonicalDrive(path: string): string {
+  return /^[a-z]:/.test(path) ? path.charAt(0).toUpperCase() + path.slice(1) : path;
 }

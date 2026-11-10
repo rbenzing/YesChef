@@ -13,7 +13,7 @@ import { getFolderDescription } from "../lib/folderdesc.js";
 import { runBatchDigest, type DigestOp } from "../lib/digest.js";
 import { readNotes, setSection, appendToSection, checkPlanItem, maybeCompact, SECTIONS, type Section } from "../lib/notes.js";
 import { compactTestOutput, truncateGeneric, isTestFailure } from "../lib/compact.js";
-import { loadConfig, overflowDir, logEvent, buildShellCommand, setTestStatus } from "../lib/core.js";
+import { loadConfig, overflowDir, logEvent, buildShellCommand, canonicalDrive, setTestStatus } from "../lib/core.js";
 
 // One notes namespace per project (not per session) — baked into the notes lib.
 const cwd = process.env.CLAUDE_PROJECT_DIR || process.cwd();
@@ -113,7 +113,7 @@ server.tool(
     const sh = buildShellCommand(command);
     const result = await new Promise<{ out: string; code: number }>((resolvePromise) => {
       execFile(sh.file, sh.args, {
-        cwd, timeout: (timeoutSeconds ?? 300) * 1000, maxBuffer: 32 * 1024 * 1024, windowsVerbatimArguments: sh.verbatim,
+        cwd: canonicalDrive(cwd), timeout: (timeoutSeconds ?? 300) * 1000, maxBuffer: 32 * 1024 * 1024, windowsVerbatimArguments: sh.verbatim,
       }, (err: any, stdout, stderr) => {
         resolvePromise({ out: `${stdout ?? ""}${stderr ? `\n${stderr}` : ""}`, code: err ? (typeof err.code === "number" ? err.code : 1) : 0 });
       });

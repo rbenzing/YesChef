@@ -143,11 +143,13 @@ const modelRows = Object.entries(t.modelUsage).sort((a, b) => b[1].cost - a[1].c
 if (modelRows.length) {
   const totalCost = modelRows.reduce((s, [, v]) => s + v.cost, 0) || 1;
   console.log(`cost by model (cache-aware estimate):`);
+  const nameWidth = Math.max(20, ...modelRows.map(([model]) => model.length));
   for (const [model, v] of modelRows) {
     const ctx = v.inTok + v.cacheRead + v.cacheWrite;
-    console.log(`  ${model.padEnd(20)} $${v.cost.toFixed(2)}  (${Math.round((v.cost / totalCost) * 100)}%)  ·  ${num(ctx)} in+cache / ${num(v.out)} out tok · ${v.turns} turns`);
+    console.log(`  ${model.padEnd(nameWidth)} $${v.cost.toFixed(2)}  (${Math.round((v.cost / totalCost) * 100)}%)  ·  ${num(ctx)} in+cache / ${num(v.out)} out tok · ${v.turns} turns`);
   }
-  console.log(`  cache reads priced ${cfg.pricing.cacheReadMult}× of base input (0.025× on Fable/Mythos 5.1), writes ${cfg.pricing.cacheWriteMult}× (5m) / ${cfg.pricing.cacheWrite1hMult}× (1h); brigade (subagent) models included.`);
+  console.log(`  cache reads priced ${cfg.pricing.cacheReadMult}× of base input (0.025× on Fable/Mythos 5.1+, 0.05× on Opus/Sonnet 5.5), writes ${cfg.pricing.cacheWriteMult}× (5m) / ${cfg.pricing.cacheWrite1hMult}× (1h); brigade (subagent) models included.`);
+  console.log(`  a "(long prompt)" or "(fast)" row is the same model's turns billed on its long-prompt or fast-mode rate card.`);
 }
 // BouzeCode's headline metric. Kept distinct from isolation on purpose: moving a
 // subagent off the main thread cuts the quadratic tail (cost), but a subagent still

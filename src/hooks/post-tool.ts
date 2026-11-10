@@ -14,6 +14,9 @@ const input = readHookInput();
 const cwd = input.cwd ?? process.cwd();
 const sessionId = input.session_id ?? "unknown";
 const tool = input.tool_name ?? "";
+// The shell tool is Bash on POSIX and PowerShell on Windows. Both take
+// tool_input.command and return { stdout, stderr, interrupted }.
+const isShell = tool === "Bash" || tool === "PowerShell";
 const cfg = loadConfig(cwd);
 const scope = contextScope(input.transcript_path);
 
@@ -56,7 +59,7 @@ try {
   if ((input.hook_event_name ?? "") === "PostToolUseFailure") {
     // Tool-level errors (timeout, interrupt, denial) — no tool_response to
     // compact; still feed the failure streak so retry storms get nudged.
-    if (tool === "Bash" && cfg.failureNudges.enabled) {
+    if (isShell && cfg.failureNudges.enabled) {
       const cmd = String(input.tool_input?.command ?? "");
       if (cmd) bumpFailureStreak(cmd);
       if (looksLikeTestCommand(cmd)) { state.lastTestsFailing = true; setTestStatus(cwd, true); }
@@ -100,7 +103,7 @@ try {
     if (state.calls.filter((x) => x === h).length <= 1) progress = true;
   }
 
-  if (tool === "Bash") {
+  if (isShell) {
     const cmd = String(input.tool_input?.command ?? "");
     const resp = extractResponseText(input.tool_response);
     // Exit codes: 0 is success, ANY other number (including negative Windows

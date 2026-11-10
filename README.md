@@ -115,7 +115,7 @@ Optional statusline (context %, cost, tokens trimmed, waste blocked): add to `~/
 }
 ```
 
-`pricing` overrides are merged key by key over the built-in table (`[input, output]` $/MTok, matched as a substring of the model id, longest key first). The defaults, including per-model cache-read rates, live in `DEFAULTS.pricing` in [src/lib/core.ts](src/lib/core.ts); only list the models you need to change.
+`pricing` overrides are merged key by key over the built-in table (`[input, output]` $/MTok, matched as a substring of the model id, longest key first). The defaults, including per-model cache-read rates and the long-prompt and fast-mode rate cards, live in `DEFAULTS.pricing` in [src/lib/core.ts](src/lib/core.ts); only list the models you need to change.
 
 Session state and telemetry live under `~/.claude/yeschef/` — nothing is written into your repos. `/yeschef:report` aggregates the log; figures are estimates, not billing data.
 

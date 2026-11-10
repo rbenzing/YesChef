@@ -22,7 +22,7 @@ try {
   const cfg = loadConfig(cwd);
   if (cfg.telemetry.enabled) {
     const state = loadState(cwd, sessionId);
-    const usage = readUsageByModel(input.transcript_path);
+    const usage = readUsageByModel(input.transcript_path, cfg.pricing);
     let perModel: Record<string, any> | null = null;
     let estCostUSD: number | null = null;
     if (usage) {
